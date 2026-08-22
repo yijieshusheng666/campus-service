@@ -97,8 +97,11 @@
         </div>
       </div>
       <div class="bar-right">
-        <el-button v-if="!isOwner" type="warning" class="want-btn" @click="handleWant">
+        <el-button v-if="!isOwner && isOnSale" type="warning" class="want-btn" @click="handleWant">
           我想要
+        </el-button>
+        <el-button v-else-if="!isOwner" type="info" disabled class="want-btn sold-btn">
+          {{ goods.status === 'sold' ? '已售出' : '已下架' }}
         </el-button>
         <el-button v-if="isOwner" type="danger" plain class="del-btn" @click="onDelete">
           删除
@@ -133,6 +136,7 @@ const imgViewerVisible = ref(false)
 const currentImgIndex = ref(0)
 
 const isOwner = computed(() => goods.value && auth.user && goods.value.seller_id === auth.user.id || goods.value?.seller_name === auth.user?.username)
+const isOnSale = computed(() => goods.value?.status === 'on_sale')
 
 function formatTime(timeStr) {
   if (!timeStr) return ''

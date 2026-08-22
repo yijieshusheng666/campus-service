@@ -82,6 +82,8 @@ python -m venv .venv
 # 安装依赖
 pip install -r requirements.txt
 
+> ⚠️ 注意：`requirements.txt` 固定了 `bcrypt==4.0.1`（2026-08 排查到 `bcrypt>=5.0` 与 `passlib 1.7.4` 不兼容，会导致登录接口 500 报错）。请勿在环境中手动升级 bcrypt；若已升级可执行 `pip install "bcrypt==4.0.1"` 降级。
+
 # 配置环境变量
 cp .env.example .env       # 然后编辑 .env 填入 DB 账号密码与 LLM API Key
 

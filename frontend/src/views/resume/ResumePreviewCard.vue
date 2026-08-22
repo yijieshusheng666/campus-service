@@ -227,13 +227,13 @@ function parseContent(text) {
 .entry-block { margin-bottom: 12px; }
 .entry-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: baseline;
   gap: 24px;
   margin-bottom: 4px;
 }
-.entry-heading { font-size: 17px; font-weight: bold; color: #111; }
-.entry-sub { font-size: 15.5px; color: #222; }
+.entry-heading { font-size: 17px; font-weight: bold; color: #111; word-break: break-word; min-width: 0; }
+.entry-sub { font-size: 15.5px; color: #222; min-width: 0; }
 .entry-date { font-size: 15px; color: #222; white-space: nowrap; text-align: right; }
 
 .entry-body { margin-top: 4px; font-size: 14.5px; line-height: 1.7; color: #222; }

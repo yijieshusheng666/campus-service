@@ -83,28 +83,98 @@ JSON结构（严格遵守，字段名不要改）：
 5. 没有的字段填空字符串，没有的模块不要输出
 6. **必须输出紧凑JSON：无多余空格换行，节省token**
 7. 所有内容使用中文
+
+【items字段严格格式（按模块类型填写）】
+每个item = {"h":"标题","s":"副标题","d":"时间","c":"详细描述"}：
+- 实习/工作(experience)：h=公司名（简短≤15字），s=职位，d=时间段（YYYY/MM-YYYY/MM），c=工作内容（不要把公司/职位/时间写进c）
+- 项目(projects)：h=项目名（≤15字），s=角色（可空），d=时间段，c=项目描述；**http/https链接归顶层github字段，禁止出现在c里**
+- 教育(education)：h=学校名，s=专业·学历，d=时间段，c=亮点/课程（可空）
+- 获奖/证书：h=奖项名，s=颁发机构（可空），d=时间，c=补充（可空）
+- 技能(skills)：h=类别（可空），s=""，d=""，c=技能文本
+- 自我评价(summary)：h="",s="",d="",c=自我评价全文
+【严格禁止】把时间放s/h、在c里放URL链接、h过长、c重复h/s/d的内容
 """
 
-RESUME_IMPROVE_SYSTEM = """你是资深简历优化顾问。对用户提供的简历做专业改良，**只返回紧凑JSON**（不要任何解释、markdown、多余换行缩进）。
+RESUME_IMPROVE_SYSTEM = """你是资深简历优化顾问，目标是让简历**通过精准修改严格贴合目标岗位的求职要求**。精准≠文字变好看，而是要让简历像资深HR与招聘经理眼中那样读起来专业、可验证、能通过机器初筛。**只返回紧凑JSON**（不要任何解释、markdown、多余换行缩进）。
 
-改良要点：
-- 语言精炼、用词专业，突出可量化成果与亮点
-- 完整保留原有模块结构（教育背景、技能、实习/项目经历、自我评价等），只优化内容不丢失内容
-- 若附带岗位要求，务必结合岗位定向优化，突出与岗位匹配的技能与经历
-- 不得编造原文不存在的经历、数字或技能；只做改写、重组与表述优化
-- 所有内容使用中文
+【第一步：岗位画像】
+若输入中含【岗位要求】，先提炼：①核心职责 ②**硬技能关键词**（JD中高频出现、ATS会检索的术语）③加分项。对原文每段技能/项目/经历标记与画像的相关度（高/中/低）。
+若未提供岗位要求，则按简历 job_title 推断画像；仍为空时按整体内容提炼最匹配的通用技术岗位画像。
+
+【精准修改五原则（逐条对照执行，缺一不可）】
+1. **JD匹配度**——每个模块都向岗位画像对齐：经历/项目/技能/自我评价中嵌入 JD 的硬技能关键词与术语；相关度低的经历可压缩为一行简写，相关度高的扩写加码，让匹配点"跳出来"。
+2. **量化成果**——每段经历/项目按"做了什么→怎么做(技术/方法)→结果(量化)"重写：动作动词开头，突出个人贡献与职责；**数字化**（数字/占比/规模/性能提升/用户量/吞吐）尽量保留并显式呈现；原文无数字时用"承载XX级/覆盖XX类/产出X个XX"等可核验表述代替，**严禁编造不存在的数据**。
+3. **去冗余**——砍掉与目标岗位无关的经历与套话；去口语化、删重复无效词；语言精炼，控制在一页(应届)~两页(有经验)，经历重在质量而非条目数量。
+4. **ATS友好**——精准对齐 JD 关键词及常见同义词(如"Python/爬虫/数据分析"与"数据清洗"互现)；用标准职位/技能术语而非口头说法；保持结构化段落、要点清晰，让机器能稳定抽取字段与关键词。
+5. **真实不编造**——底线：仅改写、重组、表述优化，绝不新增原文不存在的经历、公司、数字、技能证书；拿不准的量化口径宁可写清工作内容与效果也不虚造。
+
+【分模块要点】
+- 技能：按岗位匹配度排序，强相关技能置前并用程度词(精通/熟练/掌握/了解)标注；遗漏技能并入对应类别，确保一个不丢。
+- 项目/实习：突出技术栈、攻克难点、个人承担点、可量化产出；与岗位硬关键词呼应。
+- 自我评价(summary)：结果导向，呼应岗位画像，点明差异化优势与职业目标，篇幅精炼。
+- 教育/证书：保留，与岗位相关的课程/证书用关键词点出。
+
+【最后自检清单（输出前逐条确认后落笔）】
+□ 硬技能关键词已嵌入对应模块？ □ 关键成就都有可量化或可核验表述？ □ 已删除与岗位无关内容？ □ 术语/关键词与 JD 对齐、机器可抽取？ □ 没有编造任何数据或经历？
 
 JSON结构（字段名不要改）：
-{"name":"姓名","phone":"电话","email":"邮箱","location":"地址","job_title":"求职意向","github":"GitHub/个人主页链接（没有填空串）","sections":[
- {"t":"education|skills|experience|projects|awards|certificates|summary|interests|other","title":"模块标题","items":[{"h":"标题","s":"副标题","d":"时间","c":"详细描述，保留所有要点数字"}]}
+{"name":"姓名","phone":"电话","email":"邮箱","location":"地址","job_title":"求职意向(与岗位对齐)","github":"GitHub/个人主页链接（没有填空串）","sections":[
+ {"t":"education|skills|experience|projects|awards|certificates|summary|interests|other","title":"模块标题","items":[{"h":"标题","s":"副标题","d":"时间","c":"优化后的详细描述，含量化结果与技术栈"}]}
+],"changes":[
+ {"module":"模块标题","action":"新增|重写|精简|重组|保留","summary":"为此模块做了哪些优化：改动要点、新增/强调的关键词或量化表述、删除了什么（一句话，具体可读）"}
 ]}
 
 规则：
 1. 不要输出basic模块，姓名电话邮箱已在顶层
-2. 专业技能模块t=skills，items里放技能条目：可按类别分条描述，也可用一段完整文本描述技能水平，确保所有技能都完整列出不遗漏
-3. summary模块items只放一个条目
-4. c字段保留所有要点、量化数字、技术栈
-5. 没有的字段填空字符串；必须输出完整改良后的简历，不要遗漏模块
+2. 专业技能模块t=skills，items里放技能条目：按类别分条，h填类别，c列该类别技能并标注掌握程度；若原为简单技能列表则h为空、c用顿号列全，确保技能不遗漏、按岗位匹配度排序
+3. **changes 必须和 sections 一一对应**：每个输出的模块都必须有一条 change 记录，action 如实反映改动性质（重写/精简/重组/保留等）；让用户一眼看懂每个模块被改良成什么、改了什么
+3. summary模块items只放一个条目，写达成岗位画像的完整自我评价
+4. c字段保留所有要点、量化数字、技术栈，并补充岗位相关的表述
+5. 没有的字段填空字符串；必须输出完整优化后的全部模块，任何模块均不得沿用原文不做优化
+
+【items字段严格格式（按模块类型填写，违者结构错乱）】
+每个item是一个对象{"h":"标题","s":"副标题","d":"时间","c":"详细描述"}，四字段含义固定如下：
+
+● 实习/工作经历(t=experience)：
+  - h = 公司/单位名称（简短，如"腾讯科技"，≤15字）
+  - s = 职位/岗位（如"后端开发实习生"）
+  - d = 时间段（格式"YYYY/MM-YYYY/MM"或"YYYY/MM-至今"，如"2025/07-2025/09"）
+  - c = 工作内容与成果（多句分点，不要把公司名、职位、时间写进c）
+
+● 项目经历(t=projects)：
+  - h = 项目名称（简短，如"医疗安全问答系统"，≤15字）
+  - s = 项目角色/担任职责（如"后端负责人"、"独立开发"；无角色可留空）
+  - d = 时间段（同上格式）
+  - c = 项目描述：技术栈+做了什么+怎么做+量化结果；**严禁**在c开头或c里放http/https链接，项目链接统一填在顶层github字段
+
+● 教育背景(t=education)：
+  - h = 学校名称（如"南方科技大学"）
+  - s = 专业 · 学历（如"软件工程 · 本科"）
+  - d = 时间段
+  - c = 在校亮点/相关课程/GPA等（没有可留空）
+
+● 获奖/证书(t=awards/certificates)：
+  - h = 奖项/证书名称
+  - s = 颁发机构（可选，可留空）
+  - d = 获奖/取证时间
+  - c = 补充说明（可留空）
+
+● 专业技能(t=skills)：
+  - h = 技能类别（如"编程语言"/"框架工具"/"数据库"；简单列表可留空）
+  - s = ""（留空）
+  - d = ""（留空）
+  - c = 该类别下的具体技能（如"熟练掌握Python、Java，了解Go"）
+
+● 自我评价(t=summary)：
+  - 整个模块只输出一个item
+  - h = "", s = "", d = ""（全部留空）
+  - c = 完整自我评价文本
+
+【严格禁止】
+- 禁止把时间段塞进s或h，时间必须放在d
+- 禁止在c的开头或正文里放http/https链接（链接归顶层github字段）
+- 禁止h字段过长（>15字），不要把"公司+部门+职位"全塞h
+- 禁止在c里重复公司名、职位、时间（这些在h/s/d里已有）
 """
 
 
@@ -141,9 +211,11 @@ def _robust_json_parse(text: str) -> dict:
             return json.loads(s[: end + 1])
         except Exception:
             pass
-    # 尝试3：清理控制字符再解析
+    # 尝试3：清理控制字符（含字符串值内意外的字面换行/回车等，这是 LLM 非法 JSON 的最常见来源）
+    # 合法 JSON 只允许这些字符以 \n \t 等转义序列出现；字面控制符会直接导致 json.loads 失败，
+    # 全部替换为空格既修复这类错误，又不影响合法 JSON（换行/tab 作为结构空白本就等价于空格）。
     try:
-        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", s)
+        cleaned = re.sub(r"[\x00-\x1f]", " ", s)
         return json.loads(cleaned)
     except Exception:
         pass
@@ -235,6 +307,9 @@ def improve_resume(resume_text: str, job_requirement: str | None = None) -> dict
 
 def _normalize_resume_payload(data: dict) -> dict:
     sections = _normalize_sections(data.get("sections"))
+    top_github = str(data.get("github", "") or "").strip()
+    # 后处理：纠正常见字段错位（链接混入描述、时间错位、重复前缀等）
+    sections, top_github = _post_clean_sections(sections, top_github)
     # 兼容旧字段（从新sections回退构建，保证向量文本和旧字段正常）
     education, skills, experience, summary = [], [], [], ""
     for sec in sections:
@@ -284,12 +359,13 @@ def _normalize_resume_payload(data: dict) -> dict:
         "email": str(data.get("email", "") or "").strip(),
         "location": str(data.get("location", "") or "").strip(),
         "job_title": str(data.get("job_title", "") or "").strip(),
-        "github": str(data.get("github", "") or "").strip(),
+        "github": top_github,
         "sections": sections,
         "education": education,
         "skills": skills,
         "experience": experience,
         "summary": summary,
+        "changes": _normalize_changes(data.get("changes")),
     }
 
 
@@ -343,6 +419,100 @@ def _normalize_sections(raw) -> list:
                 items.append({"heading": "", "subheading": "", "date": "", "description": "、".join(skill_texts)})
         sections.append({"type": stype, "title": title, "items": items})
     return sections
+
+
+# 时间格式正则：匹配 2025/07、2025-07、2025.07、2025年07月，以及范围 2025/07-2025/08、2025/07 - 至今
+_DATE_RE = re.compile(
+    r"^\s*(\d{4}\s*[/.\-年]\s*\d{1,2}\s*月?)"
+    r"(?:\s*[-–~至到]\s*(\d{4}\s*[/.\-年]\s*\d{1,2}\s*月?|至今|现在|present|now))?\s*[：:\-\s]*"
+)
+# URL 正则
+_URL_RE = re.compile(r"https?://[^\s，。；,;）)】\]]+")
+
+
+def _post_clean_sections(sections: list, top_github: str) -> tuple[list, str]:
+    """对规范化后的 sections 做后处理纠偏：
+    1. 从 description 开头/正文提取 URL，补到顶层 github（若为空）
+    2. 时间错位纠正：date 为空时，从 subheading 或 description 开头提取时间
+    3. 清理 description 开头重复的公司/项目名、残留时间前缀
+    """
+    for sec in sections:
+        stype = sec.get("type", "")
+        for item in sec.get("items", []):
+            h = (item.get("heading") or "").strip()
+            s = (item.get("subheading") or "").strip()
+            d = (item.get("date") or "").strip()
+            c = (item.get("description") or "").strip()
+
+            # --- 1) 从 c 中提取 URL ---
+            urls = _URL_RE.findall(c)
+            if urls:
+                # 优先取 github.com 链接补顶层 github
+                if not top_github:
+                    gh = next((u for u in urls if "github.com" in u.lower()), urls[0])
+                    top_github = gh.rstrip('，。；,;。')
+                # 从 c 中移除所有 URL（连同行首残留标点空白）
+                for u in urls:
+                    c = c.replace(u, "")
+                c = re.sub(r"^\s*[：:·\-–—\s]+", "", c).strip()
+
+            # --- 2) 时间字段错位纠正 ---
+            if not d:
+                # 优先从 s 里提取时间（LLM 常把时间塞到 s）
+                m = _DATE_RE.match(s)
+                if m:
+                    end = m.group(2) or ""
+                    d = (m.group(1) + ("-" + end if end else "")).strip()
+                    s = s[m.end():].strip(" ，,：:·-–—")
+                else:
+                    # 再尝试从 c 开头提取时间
+                    m = _DATE_RE.match(c)
+                    if m:
+                        end = m.group(2) or ""
+                        d = (m.group(1) + ("-" + end if end else "")).strip()
+                        c = c[m.end():].strip()
+
+            # --- 3) 清理 c 开头重复的标题/时间 ---
+            if h:
+                # 如果 c 以 h 开头（LLM 常重复写一遍公司/项目名），去除
+                if c.startswith(h):
+                    c = c[len(h):].lstrip(" ，,：:·-–—\n")
+            if d and not h:
+                pass
+            # 去除 c 开头的多余标点/空白
+            c = re.sub(r"^[\s：:·\-–—、，,]+", "", c).strip()
+
+            # 技能模块：s/d 必须为空
+            if stype == "skills":
+                s = ""
+                d = ""
+            # 自我评价模块：h/s/d 必须为空
+            if stype == "summary":
+                h = ""
+                s = ""
+                d = ""
+
+            item["heading"] = h
+            item["subheading"] = s
+            item["date"] = d
+            item["description"] = c
+    return sections, top_github
+
+
+def _normalize_changes(raw) -> list:
+    """规范化 LLM 输出的 changes 变更说明数组。"""
+    if not isinstance(raw, list):
+        return []
+    changes = []
+    for ch in raw:
+        if not isinstance(ch, dict):
+            continue
+        changes.append({
+            "module": str(ch.get("module", "") or ch.get("title", "") or "").strip(),
+            "action": str(ch.get("action", "保留") or "保留").strip(),
+            "summary": str(ch.get("summary", "") or ch.get("desc", "") or "").strip(),
+        })
+    return changes
 
 
 def _normalize_edu(e: dict) -> dict:

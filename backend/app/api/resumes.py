@@ -335,4 +335,8 @@ async def improve_resume_endpoint(
         },
         "sections": result.get("sections", []),
     }
-    return ResumeImproveOut(improved_sections=result.get("sections", []), improved_project=project)
+    return ResumeImproveOut(
+        improved_sections=result.get("sections", []),
+        improved_project=project,
+        change_log=result.get("changes", []),
+    )

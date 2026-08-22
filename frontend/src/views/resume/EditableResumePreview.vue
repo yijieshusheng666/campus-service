@@ -307,15 +307,15 @@ const addSection = (type) => {
 .entry-block:hover .item-toolbar, .entry-block:hover .item-del-btn { opacity: 1; }
 .entry-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: baseline;
   gap: 24px;
   margin-bottom: 4px;
 }
-.entry-heading-edit { font-weight: bold; font-size: 17px; color: #111; }
-.entry-sub-edit { font-size: 15.5px; color: #222; }
+.entry-heading-edit { font-weight: bold; font-size: 17px; color: #111; word-break: break-word; min-width: 0; display: block; }
+.entry-sub-edit { font-size: 15.5px; color: #222; min-width: 0; display: block; }
 .entry-right { display: flex; align-items: center; gap: 8px; }
-.entry-date-edit { font-size: 15px; color: #222; white-space: nowrap; text-align: right; }
+.entry-date-edit { font-size: 15px; color: #222; white-space: nowrap; text-align: right; display: block; }
 .item-del-btn { opacity: 0; transition: opacity 0.15s; padding: 4px; }
 
 .entry-body { margin-top: 4px; font-size: 14.5px; line-height: 1.7; color: #222; }

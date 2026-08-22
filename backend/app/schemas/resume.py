@@ -48,3 +48,4 @@ class ResumeImproveOut(BaseModel):
     improved_text: str = ""
     improved_sections: list | None = None
     improved_project: dict[str, Any] | None = None
+    change_log: list | None = None

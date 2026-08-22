@@ -154,6 +154,10 @@ async def update_order_status(
             raise HTTPException(status_code=403, detail="只有买家可以付款")
         if order.status != OrderStatus.pending:
             raise HTTPException(status_code=400, detail="当前状态不可付款")
+        # 付款后立即下架商品，防止同一件商品被再次购买
+        goods = (await db.execute(select(Goods).where(Goods.id == order.goods_id))).scalar_one_or_none()
+        if goods and goods.status == GoodsStatus.on_sale:
+            goods.status = GoodsStatus.sold
     elif new_status == OrderStatus.shipped:
         # 卖家发货（paid -> shipped）
         if order.seller_id != user.id:

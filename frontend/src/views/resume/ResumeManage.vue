@@ -61,6 +61,14 @@
             :photo="improveTarget?.photo_url ? `http://localhost:8000${improveTarget.photo_url}` : ''"
           />
         </div>
+        <div v-if="changeLog.length" class="change-log">
+          <el-divider content-position="left">本次优化改动</el-divider>
+          <div class="change-item" v-for="(c, idx) in changeLog" :key="idx">
+            <span class="change-module">{{ c.module || '综合' }}</span>
+            <el-tag :type="actionTagType(c.action)" size="small" class="change-action">{{ actionLabel(c.action) }}</el-tag>
+            <span class="change-summary">{{ c.summary }}</span>
+          </div>
+        </div>
         <div class="mt-12" style="text-align: right">
           <el-button type="primary" :loading="applying" @click="applyImprovement">应用到编辑器</el-button>
         </div>
@@ -88,6 +96,7 @@ const improveTarget = ref(null)
 const improveJobReq = ref('')
 const improving = ref(false)
 const improvedProject = ref(null)
+const changeLog = ref([])
 
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
@@ -144,6 +153,7 @@ function openImprove(row) {
   improveTarget.value = row
   improveJobReq.value = ''
   improvedProject.value = null
+  changeLog.value = []
   improveDialog.value = true
 }
 
@@ -151,6 +161,7 @@ async function doImprove() {
   if (!improveTarget.value) return
   improving.value = true
   improvedProject.value = null
+  changeLog.value = []
   try {
     const res = await improveResume(improveTarget.value.id, improveJobReq.value.trim() || null)
     const d = res.data
@@ -159,12 +170,22 @@ async function doImprove() {
     } else {
       ElMessage.error('改良结果格式异常，请重试')
     }
+    changeLog.value = Array.isArray(d.change_log) ? d.change_log : []
     ElMessage.success('AI 改良完成')
   } catch (e) {
     ElMessage.error('AI 改良失败，请稍后重试')
   } finally {
     improving.value = false
   }
+}
+
+function actionLabel(action) {
+  const map = { 新增: '新增', 重写: '重写', 精简: '精简', 重组: '重组', 保留: '保留' }
+  return map[action] || action || '优化'
+}
+function actionTagType(action) {
+  const map = { 新增: 'success', 重写: 'warning', 精简: 'info', 重组: 'primary', 保留: 'info' }
+  return map[action] || 'primary'
 }
 
 const applying = ref(false)
@@ -233,4 +254,10 @@ onMounted(load)
 }
 .improved-preview :deep(.resume-preview) { padding: 32px 36px; min-height: 300px; }
 .improved-text { white-space: pre-wrap; background: #f5f7fa; padding: 12px; border-radius: 6px; line-height: 1.7; }
+.change-log { max-height: 30vh; overflow-y: auto; margin-top: 4px; }
+.change-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px dashed #e2e2e2; font-size: 13.5px; line-height: 1.6; }
+.change-item:last-child { border-bottom: none; }
+.change-module { font-weight: 600; color: #333; flex-shrink: 0; min-width: 72px; }
+.change-action { flex-shrink: 0; }
+.change-summary { color: #555; }
 </style>
