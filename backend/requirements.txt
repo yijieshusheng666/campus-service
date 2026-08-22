@@ -1,0 +1,32 @@
+# ---- Web 框架 ----
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.19
+
+# ---- 数据库：MySQL 异步 ----
+sqlalchemy[asyncio]==2.0.36
+asyncmy==0.2.10
+pymysql==1.1.1
+alembic==1.14.1
+
+# ---- 数据校验 ----
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+
+# ---- 安全 ----
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+PyJWT==2.10.1
+
+# ---- LangChain ----
+langchain==0.3.13
+langchain-openai==0.2.14
+langchain-ollama==0.2.2
+
+# ---- PDF ----
+pdfplumber==0.11.1
+
+# ---- 其他 ----
+httpx==0.28.1
+orjson==3.10.12

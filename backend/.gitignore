@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.env
+uploads/
+chroma_data/
+.mypy_cache/
+.env
