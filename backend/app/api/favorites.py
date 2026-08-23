@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_current_user, get_optional_user
+from app.api.deps import get_current_user
 from app.database import get_db
 from app.models.favorite import Favorite
 from app.models.goods import Goods
@@ -66,4 +66,5 @@ async def my_favorites(
     favorites = list((await db.execute(stmt)).scalars().all())
 
     from app.api.goods import _serialize
-    return [await _serialize(db, fav.goods, user.id) for fav in favorites]
+    # 收藏列表里的商品天然处于已收藏状态，直接置位，避免逐条回查数据库
+    return [_serialize(fav.goods, is_favorited=True) for fav in favorites]

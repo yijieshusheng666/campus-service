@@ -1,4 +1,5 @@
 """订单 API：下单、我的订单列表、状态更新（付款/发货/确认收货/取消）。"""
+import secrets
 import time
 from decimal import Decimal
 
@@ -18,7 +19,8 @@ router = APIRouter(prefix="/orders", tags=["订单"])
 
 
 def _gen_order_no() -> str:
-    return str(int(time.time() * 1000))
+    # 毫秒时间戳 + 随机后缀，避免并发下单撞唯一索引
+    return f"{int(time.time() * 1000)}{secrets.token_hex(4)}"
 
 
 async def _load_order(db: AsyncSession, order_id: int) -> Order:
@@ -69,10 +71,10 @@ async def create_order(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # 加载商品
+    # 加载商品并加行锁：防止并发下单同一件在售商品（超卖）
     goods = (
         await db.execute(
-            select(Goods).where(Goods.id == payload.goods_id)
+            select(Goods).where(Goods.id == payload.goods_id).with_for_update()
         )
     ).scalar_one_or_none()
     if not goods:
@@ -154,8 +156,12 @@ async def update_order_status(
             raise HTTPException(status_code=403, detail="只有买家可以付款")
         if order.status != OrderStatus.pending:
             raise HTTPException(status_code=400, detail="当前状态不可付款")
-        # 付款后立即下架商品，防止同一件商品被再次购买
-        goods = (await db.execute(select(Goods).where(Goods.id == order.goods_id))).scalar_one_or_none()
+        # 付款后立即下架商品，防止同一件商品被再次购买（行锁保证并发安全）
+        goods = (
+            await db.execute(
+                select(Goods).where(Goods.id == order.goods_id).with_for_update()
+            )
+        ).scalar_one_or_none()
         if goods and goods.status == GoodsStatus.on_sale:
             goods.status = GoodsStatus.sold
     elif new_status == OrderStatus.shipped:

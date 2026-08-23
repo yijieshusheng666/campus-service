@@ -37,6 +37,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# ===== SDD 执行台账（会话临时产物） =====
+.superpowers/
+
 # ===== 编辑器 / IDE =====
 .vscode/
 .idea/

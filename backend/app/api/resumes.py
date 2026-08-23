@@ -1,6 +1,8 @@
 """AI 简历 API：上传 PDF → 提取文本 → LLM 结构化解析、AI 改良。"""
+import asyncio
 import io
 import logging
+import os
 from pathlib import Path
 
 import pdfplumber
@@ -26,6 +28,12 @@ def _ensure_resume_dir() -> Path:
     d = Path(settings.UPLOAD_DIR) / "resumes"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _extract_pdf_text(pdf_path: Path) -> str:
+    """同步提取 PDF 全文（CPU/IO 密集，须放入线程池执行）。"""
+    with pdfplumber.open(pdf_path) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
 def _extract_photo_from_pdf(pdf_path: Path, output_dir: Path, base_name: str) -> str | None:
@@ -146,7 +154,6 @@ def _build_vector_text(resume: Resume) -> str:
 
 
 def _to_out(resume: Resume, include_raw_text: bool = False) -> ResumeOut:
-    import os
     out = ResumeOut.model_validate(resume)
     out.raw_text_excerpt = (resume.raw_text or "")[:200]
     if include_raw_text:
@@ -173,19 +180,20 @@ async def upload_resume(
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_PDF_EXT:
         raise HTTPException(status_code=400, detail="仅支持 PDF 简历")
-    content = await file.read()
+    content = await file.read(settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 1)
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件超过大小限制")
+    if not content[:16].startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="文件内容不是有效的 PDF")
 
     # 保存本地
     filename = safe_filename(file.filename or "resume.pdf", prefix="resume_")
     file_path = _ensure_resume_dir() / filename
     file_path.write_bytes(content)
 
-    # PDF 文本提取
+    # PDF 文本提取（同步 IO 放入线程池，避免阻塞事件循环）
     try:
-        with pdfplumber.open(file_path) as pdf:
-            raw_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        raw_text = await asyncio.to_thread(_extract_pdf_text, file_path)
     except Exception as e:
         file_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"PDF 解析失败：{e}") from e
@@ -194,17 +202,19 @@ async def upload_resume(
         file_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="未能从 PDF 中提取到文本内容")
 
-    # LLM 结构化提取（失败时保留原文，不影响入库）
+    # LLM 结构化提取（耗时较长，放入线程池；失败时保留原文，不影响入库）
     logger.info("开始 LLM 解析简历，文本长度: %d", len(raw_text))
-    parsed = extract_resume(raw_text)
+    parsed = await asyncio.to_thread(extract_resume, raw_text)
     logger.info("LLM 解析结果: %s", {k: (len(v) if isinstance(v, (list, str)) else v) for k, v in parsed.items()})
 
-    # 提取PDF中的照片
+    # 提取PDF中的照片（同样放入线程池）
     photo_path = None
     try:
         resume_dir = _ensure_resume_dir()
         base_name = Path(filename).stem
-        photo_path = _extract_photo_from_pdf(file_path, resume_dir, base_name)
+        photo_path = await asyncio.to_thread(
+            _extract_photo_from_pdf, file_path, resume_dir, base_name
+        )
         if photo_path:
             logger.info("已提取简历照片: %s", photo_path)
     except Exception as e:
@@ -319,7 +329,10 @@ async def improve_resume_endpoint(
 ):
     """AI 改良简历：不传岗位要求则通用优化，传了则定向改良。"""
     resume = await _get_owned_resume(db, resume_id, user)
-    result = improve_resume(_build_vector_text(resume), payload.job_requirement)
+    # LLM 调用耗时较长，放入线程池避免阻塞事件循环
+    result = await asyncio.to_thread(
+        improve_resume, _build_vector_text(resume), payload.job_requirement
+    )
     if not result:
         raise HTTPException(status_code=502, detail="AI 改良失败，请确认 LLM 服务已启动")
     # 结构化改良数据：供前端以原 PDF 样式预览

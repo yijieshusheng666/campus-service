@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_optional_user
 from app.config import settings
-from app.core.utils import ALLOWED_IMAGE_EXT, safe_filename
+from app.core.utils import ALLOWED_IMAGE_EXT, escape_like, looks_like_image, safe_filename
 from app.database import get_db
 from app.models.favorite import Favorite
 from app.models.goods import Goods, GoodsImage, GoodsStatus
@@ -24,19 +24,25 @@ def _ensure_upload_dir() -> Path:
     return d
 
 
-async def _serialize(db: AsyncSession, goods: Goods, viewer_id: int | None = None) -> GoodsOut:
+def _serialize(goods: Goods, *, is_favorited: bool = False) -> GoodsOut:
     out = GoodsOut.model_validate(goods)
     out.seller_name = goods.seller.username if goods.seller else ""
-    if viewer_id:
-        exists = (
-            await db.execute(
-                select(Favorite.id).where(
-                    Favorite.user_id == viewer_id, Favorite.goods_id == goods.id
-                )
-            )
-        ).scalar_one_or_none()
-        out.is_favorited = exists is not None
+    out.is_favorited = is_favorited
     return out
+
+
+async def _favorited_ids(
+    db: AsyncSession, viewer_id: int | None, goods_ids: list[int]
+) -> set[int]:
+    if not viewer_id or not goods_ids:
+        return set()
+    rows = await db.execute(
+        select(Favorite.goods_id).where(
+            Favorite.user_id == viewer_id,
+            Favorite.goods_id.in_(goods_ids),
+        )
+    )
+    return {gid for (gid,) in rows.all()}
 
 
 async def _load_goods(db: AsyncSession, goods_id: int) -> Goods:
@@ -61,9 +67,11 @@ async def upload_image(
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_IMAGE_EXT:
         raise HTTPException(status_code=400, detail=f"不支持的图片格式：{suffix or '未知'}")
-    content = await file.read()
+    content = await file.read(settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 1)
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=400, detail="图片超过大小限制")
+    if not looks_like_image(content[:16]):
+        raise HTTPException(status_code=400, detail="文件内容与图片格式不符")
     filename = safe_filename(file.filename or "img.png", prefix="img_")
     upload_dir = _ensure_upload_dir()
     (upload_dir / filename).write_bytes(content)
@@ -92,8 +100,7 @@ async def create_goods(
     for i, url in enumerate(payload.image_urls):
         db.add(GoodsImage(goods_id=goods.id, url=url, sort=i))
     await db.commit()
-    await db.refresh(goods)
-    return await _serialize(db, await _load_goods(db, goods.id), viewer_id=user.id)
+    return _serialize(await _load_goods(db, goods.id))
 
 
 @router.get("", response_model=dict)
@@ -112,7 +119,9 @@ async def list_goods(
 
     conditions = [Goods.status == GoodsStatus.on_sale]
     if keyword:
-        conditions.append(or_(Goods.title.like(f"%{keyword}%"), Goods.description.like(f"%{keyword}%")))
+        kw = escape_like(keyword.strip())
+        if kw:
+            conditions.append(or_(Goods.title.like(f"%{kw}%"), Goods.description.like(f"%{kw}%")))
     if category:
         conditions.append(Goods.category == category)
     if min_price is not None:
@@ -136,8 +145,9 @@ async def list_goods(
         stmt = stmt.order_by(Goods.id.desc())
 
     items = list((await db.execute(stmt)).scalars().all())
-    returned = [await _serialize(db, g, viewer_id) for g in items]
-    return {"items": returned, "total": total, "page": page, "page_size": page_size}
+    faved = await _favorited_ids(db, viewer_id, [g.id for g in items])
+    return {"items": [_serialize(g, is_favorited=g.id in faved) for g in items],
+            "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/categories", response_model=list)
@@ -158,7 +168,8 @@ async def my_goods(
         .order_by(Goods.id.desc())
     )
     items = list((await db.execute(stmt)).scalars().all())
-    return [await _serialize(db, g, user.id) for g in items]
+    faved = await _favorited_ids(db, user.id, [g.id for g in items])
+    return [_serialize(g, is_favorited=g.id in faved) for g in items]
 
 
 @router.get("/{goods_id}", response_model=GoodsOut)
@@ -169,7 +180,9 @@ async def get_goods(
 ):
     goods = await _load_goods(db, goods_id)
     viewer_id = user.id if user is not None else None
-    return await _serialize(db, goods, viewer_id)
+    return _serialize(
+        goods, is_favorited=goods.id in await _favorited_ids(db, viewer_id, [goods.id])
+    )
 
 
 @router.put("/{goods_id}", response_model=GoodsOut)
@@ -196,7 +209,7 @@ async def update_goods(
             db.add(GoodsImage(goods_id=goods.id, url=url, sort=i))
 
     await db.commit()
-    return await _serialize(db, await _load_goods(db, goods_id), user.id)
+    return _serialize(await _load_goods(db, goods_id))
 
 
 @router.delete("/{goods_id}", status_code=status.HTTP_204_NO_CONTENT)

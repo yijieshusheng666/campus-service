@@ -36,11 +36,11 @@ app = FastAPI(
 # 静态文件：上传的商品图片 / 简历
 app.mount(settings.STATIC_URL, StaticFiles(directory=settings.UPLOAD_DIR), name="static")
 
-# CORS
+# CORS：通配符来源与凭证携带不可同时开启（浏览器规范禁止且存在安全隐患）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_credentials=settings.cors_origins_list != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

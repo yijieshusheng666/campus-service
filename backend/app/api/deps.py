@@ -40,12 +40,12 @@ async def get_optional_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    """可选认证：无令牌返回 None，有令牌则校验。用于未登录也可浏览的接口。"""
+    """可选认证：无令牌或令牌无效返回 None；仅吞掉认证类异常，数据库错误正常抛出。"""
     if credentials is None:
         return None
     try:
         payload = decode_token(credentials.credentials)
         user_id = int(payload.get("sub"))
-        return await db.get(User, user_id)
-    except Exception:
+    except (jwt.PyJWTError, ValueError, TypeError):
         return None
+    return await db.get(User, user_id)

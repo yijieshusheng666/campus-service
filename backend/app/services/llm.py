@@ -61,11 +61,6 @@ def _build_llm():
     )
 
 
-# 面向楼下的备用工厂，便于替换 provider
-def get_llm():
-    return _build_llm()
-
-
 RESUME_EXTRACT_SYSTEM = """你是简历解析专员。从简历文本提取所有信息，**只返回紧凑JSON（不要任何解释、不要markdown、不要多余换行缩进）**。
 
 JSON结构（严格遵守，字段名不要改）：
