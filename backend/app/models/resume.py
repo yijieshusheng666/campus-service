@@ -1,10 +1,17 @@
 """简历模型：存储原始文本、LLM 结构化提取结果与向量化状态。"""
+import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+class ParseStatus(str, enum.Enum):
+    pending = "pending"          # 待后台解析
+    completed = "completed"      # 解析完成
+    failed = "failed"            # 解析失败（可重试）
 
 
 class Resume(Base):
@@ -33,6 +40,10 @@ class Resume(Base):
 
     # 用户编辑后的简历数据（在线编辑器使用）
     edited_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    parse_status: Mapped[ParseStatus] = mapped_column(
+        Enum(ParseStatus), default=ParseStatus.completed, server_default="completed"
+    )
 
     is_vectorized: Mapped[bool] = mapped_column(default=False)
     vector_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # ChromaDB id
