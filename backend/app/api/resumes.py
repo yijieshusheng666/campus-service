@@ -21,6 +21,17 @@ from app.schemas.resume import ResumeImproveIn, ResumeImproveOut, ResumeOut, Res
 from app.services.llm import extract_resume, improve_resume
 
 logger = logging.getLogger(__name__)
+
+# 后台任务强引用集：事件循环只持弱引用，不保活任务可能被 GC 中途回收
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_bg(coro) -> None:
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
+
+
 router = APIRouter(prefix="/resumes", tags=["简历"])
 
 
@@ -259,7 +270,7 @@ async def upload_resume(
     await db.commit()
     await db.refresh(resume)
 
-    asyncio.create_task(_parse_resume_task(resume.id))
+    _spawn_bg(_parse_resume_task(resume.id))
     logger.info("简历已入库待解析 id=%s 文本长度=%d", resume.id, len(raw_text))
     return _to_out(resume)
 
@@ -351,7 +362,7 @@ async def reparse_resume(
         raise HTTPException(status_code=400, detail="该简历已完成解析，无需重试")
     resume.parse_status = ParseStatus.pending
     await db.commit()
-    asyncio.create_task(_parse_resume_task(resume.id))
+    _spawn_bg(_parse_resume_task(resume.id))
     return _to_out(resume)
 
 
