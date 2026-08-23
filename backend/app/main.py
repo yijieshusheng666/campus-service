@@ -5,9 +5,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import update
 
 from app.api import api_router
 from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models.resume import ParseStatus, Resume
 
 UPLOAD_DIR = Path(settings.UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -23,6 +26,14 @@ description = """
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 进程重启会丢失进行中的后台解析任务：遗留 pending 一律标记为 failed，用户可手动重试
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(Resume)
+            .where(Resume.parse_status == ParseStatus.pending)
+            .values(parse_status=ParseStatus.failed)
+        )
+        await db.commit()
     yield
 
 

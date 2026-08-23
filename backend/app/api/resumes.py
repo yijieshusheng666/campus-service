@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.config import settings
 from app.core.utils import ALLOWED_PDF_EXT, new_id, safe_filename
-from app.database import get_db
-from app.models.resume import Resume
+from app.database import AsyncSessionLocal, get_db
+from app.models.resume import ParseStatus, Resume
 from app.models.user import User
 from app.schemas.resume import ResumeImproveIn, ResumeImproveOut, ResumeOut, ResumeUpdateIn
 from app.services.llm import extract_resume, improve_resume
@@ -28,6 +28,36 @@ def _ensure_resume_dir() -> Path:
     d = Path(settings.UPLOAD_DIR) / "resumes"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+async def _parse_resume_task(resume_id: int) -> None:
+    """后台解析任务：独立会话执行 LLM 提取，成功写回字段，失败置 failed。"""
+    async with AsyncSessionLocal() as db:
+        resume = await db.get(Resume, resume_id)
+        if not resume:
+            return
+        try:
+            parsed = await asyncio.to_thread(extract_resume, resume.raw_text)
+            if not parsed:
+                raise RuntimeError("LLM 返回空结果")
+        except Exception:
+            logger.exception("简历后台解析失败 id=%s", resume_id)
+            resume.parse_status = ParseStatus.failed
+            await db.commit()
+            return
+        resume.parsed_name = parsed.get("name")
+        resume.parsed_phone = parsed.get("phone")
+        resume.parsed_email = parsed.get("email")
+        resume.parsed_location = parsed.get("location")
+        resume.parsed_job_title = parsed.get("job_title")
+        resume.parsed_education = parsed.get("education") or None
+        resume.parsed_skills = parsed.get("skills") or None
+        resume.parsed_experience = parsed.get("experience") or None
+        resume.parsed_summary = parsed.get("summary")
+        resume.parsed_sections = parsed.get("sections") or None
+        resume.parse_status = ParseStatus.completed
+        await db.commit()
+        logger.info("简历后台解析完成 id=%s", resume_id)
 
 
 def _extract_pdf_text(pdf_path: Path) -> str:
@@ -202,12 +232,7 @@ async def upload_resume(
         file_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="未能从 PDF 中提取到文本内容")
 
-    # LLM 结构化提取（耗时较长，放入线程池；失败时保留原文，不影响入库）
-    logger.info("开始 LLM 解析简历，文本长度: %d", len(raw_text))
-    parsed = await asyncio.to_thread(extract_resume, raw_text)
-    logger.info("LLM 解析结果: %s", {k: (len(v) if isinstance(v, (list, str)) else v) for k, v in parsed.items()})
-
-    # 提取PDF中的照片（同样放入线程池）
+    # 提取PDF中的照片（同步阶段完成，秒级）
     photo_path = None
     try:
         resume_dir = _ensure_resume_dir()
@@ -220,30 +245,22 @@ async def upload_resume(
     except Exception as e:
         logger.debug("照片提取异常: %s", e)
 
-    vector_id = new_id()
+    # 入库为待解析状态并立即返回；LLM 结构化解析转后台任务
     resume = Resume(
         user_id=user.id,
         file_name=file.filename or filename,
         file_path=str(file_path),
         photo_path=photo_path,
         raw_text=raw_text,
-        parsed_name=parsed.get("name"),
-        parsed_phone=parsed.get("phone"),
-        parsed_email=parsed.get("email"),
-        parsed_location=parsed.get("location"),
-        parsed_job_title=parsed.get("job_title"),
-        parsed_education=parsed.get("education") or None,
-        parsed_skills=parsed.get("skills") or None,
-        parsed_experience=parsed.get("experience") or None,
-        parsed_summary=parsed.get("summary"),
-        parsed_sections=parsed.get("sections") or None,
-        vector_id=vector_id,
+        parse_status=ParseStatus.pending,
+        vector_id=new_id(),
     )
     db.add(resume)
-    await db.flush()
-
     await db.commit()
     await db.refresh(resume)
+
+    asyncio.create_task(_parse_resume_task(resume.id))
+    logger.info("简历已入库待解析 id=%s 文本长度=%d", resume.id, len(raw_text))
     return _to_out(resume)
 
 
@@ -318,6 +335,24 @@ async def _get_owned_resume(db: AsyncSession, resume_id: int, user: User) -> Res
     if resume.user_id != user.id:
         raise HTTPException(status_code=403, detail="无权访问他人简历")
     return resume
+
+
+@router.post("/{resume_id}/reparse", response_model=ResumeOut)
+async def reparse_resume(
+    resume_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """解析失败的简历重新触发后台 AI 解析。"""
+    resume = await _get_owned_resume(db, resume_id, user)
+    if resume.parse_status == ParseStatus.pending:
+        raise HTTPException(status_code=409, detail="该简历正在解析中，请稍候")
+    if resume.parse_status == ParseStatus.completed:
+        raise HTTPException(status_code=400, detail="该简历已完成解析，无需重试")
+    resume.parse_status = ParseStatus.pending
+    await db.commit()
+    asyncio.create_task(_parse_resume_task(resume.id))
+    return _to_out(resume)
 
 
 @router.post("/{resume_id}/improve", response_model=ResumeImproveOut)

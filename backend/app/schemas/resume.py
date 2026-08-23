@@ -15,6 +15,7 @@ class ResumeOut(BaseModel):
 
     id: int
     file_name: str
+    parse_status: str = "completed"
     created_at: datetime
     raw_text_excerpt: str = ""
     is_vectorized: bool = False
