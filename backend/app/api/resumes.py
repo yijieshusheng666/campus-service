@@ -8,7 +8,7 @@ from pathlib import Path
 import pdfplumber
 from PIL import Image
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -29,7 +29,13 @@ _bg_tasks: set[asyncio.Task] = set()
 def _spawn_bg(coro) -> None:
     t = asyncio.create_task(coro)
     _bg_tasks.add(t)
-    t.add_done_callback(_bg_tasks.discard)
+
+    def _on_done(task: asyncio.Task) -> None:
+        _bg_tasks.discard(task)
+        if not task.cancelled() and task.exception():
+            logger.error("后台任务异常: %s", task.exception())
+
+    t.add_done_callback(_on_done)
 
 
 router = APIRouter(prefix="/resumes", tags=["简历"])
@@ -41,34 +47,58 @@ def _ensure_resume_dir() -> Path:
     return d
 
 
+async def _mark_parse_failed(resume_id: int) -> None:
+    """尽力把简历标记为解析失败；本身再失败只记录日志。"""
+    try:
+        async with AsyncSessionLocal() as db:
+            resume = await db.get(Resume, resume_id)
+            if resume:
+                resume.parse_status = ParseStatus.failed
+                await db.commit()
+    except Exception:
+        logger.exception("标记解析失败状态时出错 id=%s", resume_id)
+
+
 async def _parse_resume_task(resume_id: int) -> None:
-    """后台解析任务：独立会话执行 LLM 提取，成功写回字段，失败置 failed。"""
+    """后台解析任务：两段式会话——LLM 调用期间不占用数据库连接。"""
+    # 阶段A：仅读取原文并立即释放连接
     async with AsyncSessionLocal() as db:
         resume = await db.get(Resume, resume_id)
         if not resume:
             return
-        try:
-            parsed = await asyncio.to_thread(extract_resume, resume.raw_text)
-            if not parsed:
-                raise RuntimeError("LLM 返回空结果")
-        except Exception:
-            logger.exception("简历后台解析失败 id=%s", resume_id)
-            resume.parse_status = ParseStatus.failed
+        raw_text = resume.raw_text
+
+    try:
+        parsed = await asyncio.to_thread(extract_resume, raw_text)
+        if not parsed:
+            raise RuntimeError("LLM 返回空结果")
+    except Exception:
+        logger.exception("简历后台解析失败 id=%s", resume_id)
+        await _mark_parse_failed(resume_id)
+        return
+
+    # 阶段B：写回结果
+    try:
+        async with AsyncSessionLocal() as db:
+            resume = await db.get(Resume, resume_id)
+            if not resume:
+                return
+            resume.parsed_name = parsed.get("name")
+            resume.parsed_phone = parsed.get("phone")
+            resume.parsed_email = parsed.get("email")
+            resume.parsed_location = parsed.get("location")
+            resume.parsed_job_title = parsed.get("job_title")
+            resume.parsed_education = parsed.get("education") or None
+            resume.parsed_skills = parsed.get("skills") or None
+            resume.parsed_experience = parsed.get("experience") or None
+            resume.parsed_summary = parsed.get("summary")
+            resume.parsed_sections = parsed.get("sections") or None
+            resume.parse_status = ParseStatus.completed
             await db.commit()
-            return
-        resume.parsed_name = parsed.get("name")
-        resume.parsed_phone = parsed.get("phone")
-        resume.parsed_email = parsed.get("email")
-        resume.parsed_location = parsed.get("location")
-        resume.parsed_job_title = parsed.get("job_title")
-        resume.parsed_education = parsed.get("education") or None
-        resume.parsed_skills = parsed.get("skills") or None
-        resume.parsed_experience = parsed.get("experience") or None
-        resume.parsed_summary = parsed.get("summary")
-        resume.parsed_sections = parsed.get("sections") or None
-        resume.parse_status = ParseStatus.completed
-        await db.commit()
         logger.info("简历后台解析完成 id=%s", resume_id)
+    except Exception:
+        logger.exception("简历解析结果写回失败 id=%s", resume_id)
+        await _mark_parse_failed(resume_id)
 
 
 def _extract_pdf_text(pdf_path: Path) -> str:
@@ -356,13 +386,19 @@ async def reparse_resume(
 ):
     """解析失败的简历重新触发后台 AI 解析。"""
     resume = await _get_owned_resume(db, resume_id, user)
-    if resume.parse_status == ParseStatus.pending:
-        raise HTTPException(status_code=409, detail="该简历正在解析中，请稍候")
     if resume.parse_status == ParseStatus.completed:
         raise HTTPException(status_code=400, detail="该简历已完成解析，无需重试")
-    resume.parse_status = ParseStatus.pending
+    # 原子置位：仅 failed 可转 pending；rowcount==0 说明已在解析中或被并发请求抢先
+    result = await db.execute(
+        update(Resume)
+        .where(Resume.id == resume.id, Resume.parse_status == ParseStatus.failed)
+        .values(parse_status=ParseStatus.pending)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=409, detail="该简历正在解析中，请稍候")
     await db.commit()
     _spawn_bg(_parse_resume_task(resume.id))
+    await db.refresh(resume)
     return _to_out(resume)
 
 

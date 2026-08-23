@@ -137,6 +137,7 @@ async function onUpload({ file }) {
   }
 }
 let pollTimer = null
+let polling = false
 function stopPoll() {
   if (pollTimer) {
     clearInterval(pollTimer)
@@ -152,9 +153,17 @@ async function load() {
     stopPoll()
     if (res.data.some((r) => r.parse_status === 'pending')) {
       pollTimer = setInterval(async () => {
-        const r2 = await myResumes()
-        resumes.value = r2.data
-        if (!r2.data.some((x) => x.parse_status === 'pending')) stopPoll()
+        if (polling) return
+        polling = true
+        try {
+          const r2 = await myResumes()
+          resumes.value = r2.data
+          if (!r2.data.some((x) => x.parse_status === 'pending')) stopPoll()
+        } catch {
+          // 轮询失败静默：下一轮自愈，避免未处理 rejection 刷屏
+        } finally {
+          polling = false
+        }
       }, 2000)
     }
   } finally {
