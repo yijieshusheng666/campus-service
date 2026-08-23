@@ -29,6 +29,18 @@
               <el-tag v-if="r.edited_data" size="small" type="success" class="ml-8">
                 已改良
               </el-tag>
+              <el-tag v-if="r.parse_status === 'pending'" size="small" type="warning" class="ml-8">
+                <el-icon class="is-loading" style="vertical-align:-2px;margin-right:2px"><Loading /></el-icon>
+                AI 解析中
+              </el-tag>
+              <el-tag
+                v-else-if="r.parse_status === 'failed'"
+                size="small"
+                type="danger"
+                class="ml-8"
+                style="cursor:pointer"
+                @click="onReparse(r)"
+              >解析失败，点击重试</el-tag>
             </div>
             <div class="text-muted">
               文件：{{ r.file_name }} · 上传于 {{ formatDate(r.created_at) }}
@@ -39,7 +51,7 @@
               <el-icon style="margin-right:4px"><Edit /></el-icon>
               在线编辑
             </el-button>
-            <el-button type="primary" plain @click="openImprove(r)">AI 改良</el-button>
+            <el-button type="primary" plain :disabled="r.parse_status !== 'completed'" @click="openImprove(r)">AI 改良</el-button>
             <el-button type="danger" plain @click="onDelete(r)">删除</el-button>
           </div>
         </div>
@@ -78,11 +90,11 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { DocumentAdd, Edit } from '@element-plus/icons-vue'
-import { uploadResume, myResumes, deleteResume, improveResume, updateResume } from '@/api/resume'
+import { uploadResume, myResumes, deleteResume, improveResume, updateResume, reparseResume } from '@/api/resume'
 import ResumePreviewCard from './ResumePreviewCard.vue'
 
 const router = useRouter()
@@ -115,7 +127,7 @@ function beforeUpload(file) {
 async function onUpload({ file }) {
   try {
     const res = await uploadResume(file)
-    ElMessage.success('简历上传并解析成功！请点击「AI 改良」开始优化简历')
+    ElMessage.success('已上传，AI 解析完成后即可编辑')
     await load()
   } catch (e) {
     console.error('上传失败：', e)
@@ -124,13 +136,39 @@ async function onUpload({ file }) {
     uploading.value = false
   }
 }
+let pollTimer = null
+function stopPoll() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
 async function load() {
   loading.value = true
   try {
     const res = await myResumes()
     resumes.value = res.data
+    // 存在解析中的卡片时每 2s 轮询，全部落定后停止
+    stopPoll()
+    if (res.data.some((r) => r.parse_status === 'pending')) {
+      pollTimer = setInterval(async () => {
+        const r2 = await myResumes()
+        resumes.value = r2.data
+        if (!r2.data.some((x) => x.parse_status === 'pending')) stopPoll()
+      }, 2000)
+    }
   } finally {
     loading.value = false
+  }
+}
+onUnmounted(stopPoll)
+async function onReparse(row) {
+  try {
+    await reparseResume(row.id)
+    ElMessage.success('已重新提交 AI 解析')
+    load()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '重试失败')
   }
 }
 async function onDelete(row) {

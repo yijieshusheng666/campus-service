@@ -14,3 +14,4 @@ export const updateResume = (id, editedData) => request.put(`/api/v1/resumes/${i
 export const deleteResume = (id) => request.delete(`/api/v1/resumes/${id}`)
 export const improveResume = (id, jobRequirement) =>
   request.post(`/api/v1/resumes/${id}/improve`, { job_requirement: jobRequirement || null }, { timeout: 300000 })
+export const reparseResume = (id) => request.post(`/api/v1/resumes/${id}/reparse`)
