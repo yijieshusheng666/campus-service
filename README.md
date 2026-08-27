@@ -1,18 +1,20 @@
 # 校园综合服务平台
 
-一个面向校园场景的「**二手交易** + **AI 简历**」一体化全栈项目。
+一个面向校园场景的「**二手交易** + **AI 简历** + **AI 模拟面试**」一体化全栈项目。
 
 - **二手交易**：发布/浏览二手商品、图片上传、关键词与分类筛选、收藏、下单购买、订单状态流转（仿闲鱼 UI 风格）
 - **AI 简历**：上传 PDF 简历 → 自动结构化提取 → 在线所见即所得编辑 → AI 智能优化改良
+- **AI 模拟面试**：选简历 + 目标岗位 → LLM 面试官多轮提问（SSE 流式输出）→ 结构化评估报告
 
 ## 技术栈
 
 | 层 | 技术 |
 | --- | --- |
 | 后端 | Python · FastAPI · SQLAlchemy 2.0 (Async) · Alembic · Pydantic V2 · PyJWT |
-| AI | LangChain · OpenAI 兼容 API（默认智谱 BigModel，可切换 Ollama） |
-| 前端 | Vue 3 · Vite · Pinia · Vue Router · Element Plus · Axios |
+| AI | LangChain · OpenAI 兼容 API（默认智谱 BigModel，可切换 Ollama） · SSE 流式输出 |
+| 前端 | Vue 3 · Vite · Pinia · Vue Router · Element Plus · Axios · 原生 fetch 流式读取 |
 | 数据库 | MySQL 8.0 |
+| 测试 | pytest · pytest-asyncio · aiosqlite（sqlite 内存库集成测试） |
 
 ## 功能一览
 
@@ -35,29 +37,36 @@
 - **AI 改良**：可附带岗位要求定向优化，输出与原文同风格的预览
 - 备份不同版本，随时应用回编辑器
 
+### AI 模拟面试
+- 选择简历（可选）与目标岗位，创建面试会话
+- LLM 面试官基于简历内容与岗位画像逐题提问、多轮追问，**SSE 流式打字机输出**
+- 结束面试生成**结构化评估报告**：综合得分、维度评分、优势/短板/改进建议
+- 会话与报告保存，可随时回看历史面试
+
 ## 目录结构
 
 ```
 .
 ├── backend/                    # FastAPI 后端
 │   ├── app/
-│   │   ├── api/                # 路由：auth / users / goods / favorites / resumes / orders
+│   │   ├── api/                # 路由：auth / users / goods / favorites / resumes / orders / interviews
 │   │   ├── core/               # 安全（JWT/密码哈希）、通用工具
 │   │   ├── models/             # SQLAlchemy 模型
 │   │   ├── schemas/            # Pydantic V2 请求/响应契约
-│   │   ├── services/           # llm.py（LLM 客户端复用 + 提取/改良）
+│   │   ├── services/           # llm.py（LLM 客户端复用） / interview.py（面试官+评估报告）
 │   │   ├── config.py           # 应用配置（pydantic-settings）
 │   │   └── main.py
 │   ├── alembic/versions/       # 数据库迁移
 │   ├── scripts/                # 数据导入等一次性脚本
+│   ├── tests/                  # pytest 集成测试（sqlite 内存库）
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/                   # Vue 3 前端
 │   └── src/
-│       ├── api/                # Axios 接口封装
+│       ├── api/                # Axios 接口封装 + SSE 流式工具
 │       ├── stores/             # Pinia（用户状态）
 │       ├── router/             # Vue Router
-│       ├── views/              # 页面（goods / resume / 登录注册 / 设置）
+│       ├── views/              # 页面（goods / resume / interview / 登录注册 / 设置）
 │       ├── layout/             # 主布局 + 侧边栏
 │       └── styles/             # 全局样式
 └── README.md / .env
@@ -106,7 +115,16 @@ npm run dev
 
 前端地址：`http://localhost:5173`，已将 `/api` 与 `/static` 代理到 `:8000`。
 
-### 3. 准备数据库
+### 3. 运行测试
+
+```bash
+cd backend
+python -m pytest -v
+```
+
+测试使用 sqlite 内存库，不依赖 MySQL 与 LLM（AI 服务在测试中被 mock）。
+
+### 4. 准备数据库
 
 默认库名 `campus_platform`，连接信息由 `.env` 控制：
 
@@ -147,6 +165,7 @@ DB_NAME=campus_platform
 | 收藏 | `GET /favorites` · `POST/DELETE /favorites/{goods_id}` |
 | 简历 | `POST /resumes/upload` · `GET /resumes/mine` · `GET/PUT/DELETE /resumes/{id}` · `POST /resumes/{id}/improve` |
 | 订单 | `POST /orders` · `GET /orders` · `GET /orders/{id}` · `PUT /orders/{id}/status` |
+| 模拟面试 | `POST /interviews`（SSE） · `GET /interviews` · `GET /interviews/{id}` · `POST /interviews/{id}/chat`（SSE） · `POST /interviews/{id}/finish` |
 | 系统 | `GET /health` |
 
 ## 安全说明

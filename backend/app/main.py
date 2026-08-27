@@ -16,11 +16,12 @@ UPLOAD_DIR = Path(settings.UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 description = """
-**校园综合服务平台**：二手交易 + AI 简历一体化平台。
+**校园综合服务平台**：二手交易 + AI 简历 + AI 模拟面试一体化平台。
 
 - 用户系统：JWT 认证，登录注册统一身份，均可买卖二手与求职
 - 二手交易：商品 CRUD、图片上传、分页搜索、收藏、订单
 - AI 简历：PDF 上传 → LLM 结构化提取 → 可视化编辑与 AI 改良
+- AI 模拟面试：选简历+岗位 → LLM 面试官多轮提问（SSE 流式）→ 结构化评估报告
 """
 
 
