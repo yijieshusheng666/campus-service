@@ -1,7 +1,7 @@
 """API 路由包。"""
 from fastapi import APIRouter
 
-from app.api import auth, favorites, goods, interviews, orders, resumes, users
+from app.api import auth, errands, favorites, goods, interviews, orders, resumes, users
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -11,3 +11,4 @@ api_router.include_router(favorites.router)
 api_router.include_router(resumes.router)
 api_router.include_router(orders.router)
 api_router.include_router(interviews.router)
+api_router.include_router(errands.router)
