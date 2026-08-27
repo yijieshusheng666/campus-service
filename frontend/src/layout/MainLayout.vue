@@ -52,11 +52,15 @@
         <el-sub-menu index="career">
           <template #title>
             <el-icon class="menu-icon"><Briefcase /></el-icon>
-            <span>AI简历</span>
+            <span>AI求职</span>
           </template>
           <el-menu-item v-if="auth.isAuthenticated" index="/resume">
             <span class="menu-dot"></span>
             <span>我的简历</span>
+          </el-menu-item>
+          <el-menu-item v-if="auth.isAuthenticated" index="/interviews">
+            <span class="menu-dot"></span>
+            <span>AI 模拟面试</span>
           </el-menu-item>
         </el-sub-menu>
       </el-menu>
@@ -130,12 +134,15 @@ const breadcrumbMap = {
   '/my-orders': '我的订单',
   '/favorites': '我的收藏',
   '/resume': '我的简历',
+  '/interviews': 'AI 模拟面试',
   '/settings': '账号设置'
 }
 const currentBreadcrumb = computed(() => {
   const path = route.path
   if (path.startsWith('/goods/')) return '商品详情'
   if (path.startsWith('/resume/edit/')) return '简历编辑'
+  if (path.startsWith('/interviews/') && path.endsWith('/report')) return '面试评估报告'
+  if (path.startsWith('/interviews/')) return '面试对话'
   return breadcrumbMap[path] || ''
 })
 

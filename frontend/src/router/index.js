@@ -55,6 +55,24 @@ const routes = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'interviews',
+        name: 'InterviewList',
+        component: () => import('@/views/interview/InterviewList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'interviews/:id',
+        name: 'InterviewChat',
+        component: () => import('@/views/interview/InterviewChat.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'interviews/:id/report',
+        name: 'InterviewReport',
+        component: () => import('@/views/interview/InterviewReport.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
