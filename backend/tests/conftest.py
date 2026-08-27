@@ -27,6 +27,23 @@ async def _override_get_db():
 
 app.dependency_overrides[get_db] = _override_get_db
 
+# 两段式落库使用 AsyncSessionLocal，测试环境重定向到测试库
+import app.api.interviews as _interviews_mod
+
+
+async def _test_persist(interview_id: int, content: str) -> int:
+    async with TestingSessionLocal() as db:
+        msg = _interviews_mod.InterviewMessage(
+            interview_id=interview_id, role="assistant", content=content
+        )
+        db.add(msg)
+        await db.commit()
+        await db.refresh(msg)
+        return msg.id
+
+
+_interviews_mod._persist_assistant_message = _test_persist
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
