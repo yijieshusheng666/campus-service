@@ -173,6 +173,18 @@ async def get_interview(
     return out
 
 
+# ---- 删除面试会话（级联删除消息） ----
+@router.delete("/{interview_id}", status_code=204)
+async def delete_interview(
+    interview_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    itv = await _load_own_interview(db, interview_id, user)
+    await db.delete(itv)
+    await db.commit()
+
+
 # ---- 对话：提交回答，SSE 流式返回追问 ----
 @router.post("/{interview_id}/chat")
 async def chat_interview(
@@ -187,6 +199,8 @@ async def chat_interview(
 
     # 用户消息先落库（两段式：LLM 流式期间不占用本事务连接）
     content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="回答内容不能为空")
     user_msg = InterviewMessage(interview_id=itv.id, role="user", content=content)
     db.add(user_msg)
     await db.commit()

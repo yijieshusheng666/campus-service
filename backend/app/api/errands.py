@@ -66,14 +66,15 @@ async def list_errands(
         selectinload(Errand.publisher), selectinload(Errand.runner)
     )
     if role == "published":
-        stmt = stmt.where(Errand.user_id == user.id)
+        # 我发布的：已取消的不在列表中展示
+        stmt = stmt.where(
+            Errand.user_id == user.id, Errand.status != ErrandStatus.cancelled
+        )
     elif role == "accepted":
         stmt = stmt.where(Errand.runner_id == user.id)
     else:
-        # 大厅只展示待接单且非自己发布的需求
-        stmt = stmt.where(
-            Errand.status == ErrandStatus.pending, Errand.user_id != user.id
-        )
+        # 大厅展示所有待接单需求（含自己发布的，详情页/接口层禁止接自己的单）
+        stmt = stmt.where(Errand.status == ErrandStatus.pending)
     stmt = stmt.order_by(Errand.id.desc())
     errands = list((await db.execute(stmt)).scalars().all())
     return errands

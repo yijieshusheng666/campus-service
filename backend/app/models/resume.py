@@ -38,15 +38,16 @@ class Resume(Base):
     # 动态模块结构（解析后的全部模块，前端据此自由识别渲染）
     parsed_sections: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
-    # 用户编辑后的简历数据（在线编辑器使用）
+    # 用户编辑后的简历数据（历史遗留：仅旧数据读取，已无写入入口）
     edited_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # AI 优化建议（只诊断不改写；每次生成覆盖，仅保留最新一轮）
+    suggestions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    suggestions_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     parse_status: Mapped[ParseStatus] = mapped_column(
         Enum(ParseStatus), default=ParseStatus.completed, server_default="completed"
     )
-
-    is_vectorized: Mapped[bool] = mapped_column(default=False)
-    vector_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # ChromaDB id
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

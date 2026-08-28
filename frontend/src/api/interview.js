@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 
 export const myInterviews = () => request.get('/api/v1/interviews')
 export const getInterview = (id) => request.get(`/api/v1/interviews/${id}`)
+export const deleteInterview = (id) => request.delete(`/api/v1/interviews/${id}`)
 export const finishInterview = (id) =>
   request.post(`/api/v1/interviews/${id}/finish`, {}, { timeout: 300000 })
 

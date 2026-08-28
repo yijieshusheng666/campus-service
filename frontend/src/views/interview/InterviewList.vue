@@ -16,6 +16,13 @@
         </div>
         <div class="meta">
           <span>{{ it.message_count }} 条消息 · {{ formatTime(it.updated_at) }}</span>
+          <el-button
+            class="del-btn"
+            type="danger"
+            size="small"
+            plain
+            @click.stop="onDelete(it)"
+          >删除</el-button>
         </div>
       </div>
       <div class="last">{{ it.last_content }}</div>
@@ -45,8 +52,8 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { createInterviewSse, myInterviews } from '@/api/interview'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { createInterviewSse, deleteInterview, myInterviews } from '@/api/interview'
 import { myResumes } from '@/api/resume'
 
 const router = useRouter()
@@ -97,6 +104,23 @@ const goChat = (it) => {
       ? { name: 'InterviewReport', params: { id: it.id } }
       : { name: 'InterviewChat', params: { id: it.id } }
   )
+}
+
+const onDelete = async (it) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${it.job_position}」这场面试吗？删除后消息记录将一并移除。`,
+      '删除面试',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  try {
+    await deleteInterview(it.id)
+    ElMessage.success('已删除')
+    load()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '删除失败')
+  }
 }
 
 const formatTime = (t) => new Date(t).toLocaleString('zh-CN', { hour12: false })

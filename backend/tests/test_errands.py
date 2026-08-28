@@ -101,14 +101,15 @@ async def test_concurrent_accept(auth_client, client):
     assert sorted(codes) == [200, 400], f"应恰好一个成功一个被拒，实际: {codes}"
 
 
-async def test_hall_excludes_own(auth_client, client):
-    await _publish(auth_client, auth_client.headers["Authorization"])
-    # 大厅：发布者自己看不到
+async def test_hall_includes_own_and_published_hides_cancelled(auth_client, client):
+    errand_id = await _publish(auth_client, auth_client.headers["Authorization"])
+
+    # 大厅：包含自己发布的待接单需求（接单接口层会拒绝自己接单）
     resp = await auth_client.get("/api/v1/errands")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert len(resp.json()) == 1
 
-    # 其他人能看到
+    # 其他人同样能看到
     token = await _register(client, "watcher")
     resp = await client.get("/api/v1/errands", headers={"Authorization": token})
     assert resp.status_code == 200
@@ -117,3 +118,13 @@ async def test_hall_excludes_own(auth_client, client):
     # published 视图：发布者能看到自己发布的
     resp = await auth_client.get("/api/v1/errands?role=published")
     assert len(resp.json()) == 1
+
+    # 取消后：大厅不再展示（非 pending），published 视图也不再展示
+    resp = await auth_client.put(
+        f"/api/v1/errands/{errand_id}/status", json={"status": "cancelled"}
+    )
+    assert resp.status_code == 200
+    resp = await auth_client.get("/api/v1/errands")
+    assert resp.json() == []
+    resp = await auth_client.get("/api/v1/errands?role=published")
+    assert resp.json() == []

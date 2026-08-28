@@ -50,7 +50,7 @@
           <div class="seller-name">{{ goods.seller_name }}</div>
           <div class="seller-meta">校园卖家</div>
         </div>
-        <el-button v-if="!isOwner" type="warning" size="small" plain class="chat-btn">
+        <el-button v-if="!isOwner" type="warning" size="small" plain class="chat-btn" @click="handleChat">
           <el-icon><ChatDotRound /></el-icon>
           聊一聊
         </el-button>
@@ -181,6 +181,14 @@ function handleWant() {
     return
   }
   router.push({ path: '/order-confirm', query: { goods_id: goods.value.id } })
+}
+
+function handleChat() {
+  if (!auth.isAuthenticated) {
+    router.push('/login')
+    return
+  }
+  router.push({ name: 'Chat', params: { userId: goods.value.seller_id } })
 }
 
 async function onDelete() {
