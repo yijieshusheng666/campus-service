@@ -39,6 +39,10 @@ Thumbs.db
 
 # ===== SDD 执行台账（会话临时产物） =====
 .superpowers/
+.dumate/
+
+# ===== 独立子仓库（daily-ai-brief 自带 .git，不入父仓库） =====
+daily-ai-brief/
 
 # ===== 编辑器 / IDE =====
 .vscode/

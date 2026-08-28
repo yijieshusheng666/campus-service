@@ -1,8 +1,9 @@
 """二手商品 API：CRUD、图片上传、分页搜索、收藏联动。"""
+import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import func, or_, select
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,9 +14,12 @@ from app.database import get_db
 from app.models.favorite import Favorite
 from app.models.goods import Goods, GoodsImage, GoodsStatus
 from app.models.user import User
-from app.schemas.goods import GoodsCreate, GoodsOut, GoodsUpdate
+from app.agents.goods_agent import analyze_goods, suggest_price
+from app.schemas.goods import GoodsAnalyzeIn, GoodsCreate, GoodsOut, GoodsUpdate
 
 router = APIRouter(prefix="/goods", tags=["二手交易"])
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_upload_dir() -> Path:
@@ -156,6 +160,63 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
     return [r for r in rows if r]
 
 
+@router.post("/analyze", response_model=dict)
+async def analyze_goods_info(
+    payload: GoodsAnalyzeIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent 分析商品信息：图片 + 描述 → 标题/描述/分类/成色 + 定价建议。
+
+    定价参考同类商品历史成交价（RAG），失败回退空建议不阻塞前端。
+    """
+    urls = [u for u in payload.image_urls if isinstance(u, str) and u.strip()]
+    hint = payload.user_hint.strip()
+
+    # 1. 基础信息分析（agent 内部会自动将相对路径转为 base64 data URL）
+    base = await analyze_goods(urls, hint)
+
+    # 2. 同类商品历史成交价（RAG 定价参考）
+    category = base.get("category", "其他")
+    condition = base.get("condition", "九成新")
+    price_text = "无历史数据"
+    if category:
+        try:
+            rows = await db.execute(
+                select(Goods.price)
+                .where(
+                    Goods.category == category,
+                    Goods.status == GoodsStatus.on_sale,
+                )
+                .order_by(Goods.price.desc())
+                .limit(20)
+            )
+            prices = [float(r) for (r,) in rows.all() if r is not None]
+            if prices:
+                avg = sum(prices) / len(prices)
+                min_p, max_p = min(prices), max(prices)
+                price_text = f"历史成交价区间 ¥{min_p:.0f}-{max_p:.0f}，平均 ¥{avg:.0f}（共{len(prices)}件）"
+        except Exception as e:
+            logger.warning("price query failed: %s", e)
+
+    # 3. 定价建议
+    price = await suggest_price(
+        category=category,
+        condition=condition,
+        description=base.get("description", ""),
+        price_range_text=price_text,
+    )
+
+    return {
+        "title": base.get("title", ""),
+        "description": base.get("description", ""),
+        "category": category,
+        "condition": condition,
+        "suggested_price": base.get("suggested_price", 0),
+        "price_advice": price,
+        "debug": {"price_range_text": price_text},
+    }
+
+
 @router.get("/mine", response_model=list[GoodsOut])
 async def my_goods(
     db: AsyncSession = Depends(get_db),
@@ -222,6 +283,6 @@ async def delete_goods(
     if goods.seller_id != user.id:
         raise HTTPException(status_code=403, detail="只能删除自己的商品")
     # 级联删除收藏与图片
-    await db.execute(Favorite.__table__.delete().where(Favorite.goods_id == goods.id))
+    await db.execute(delete(Favorite).where(Favorite.goods_id == goods.id))
     await db.delete(goods)
     await db.commit()

@@ -15,7 +15,7 @@
       <!-- 导航菜单 -->
       <el-menu
         :default-active="activeMenu"
-        :default-openeds="['trade', 'career']"
+        :default-openeds="['trade', 'errand', 'career']"
         router
         class="side-menu"
         background-color="transparent"
@@ -46,6 +46,21 @@
           <el-menu-item v-if="auth.isAuthenticated" index="/favorites">
             <span class="menu-dot"></span>
             <span>我的收藏</span>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="errand">
+          <template #title>
+            <el-icon class="menu-icon"><Van /></el-icon>
+            <span>校园跑腿</span>
+          </template>
+          <el-menu-item v-if="auth.isAuthenticated" index="/errands">
+            <span class="menu-dot"></span>
+            <span>跑腿大厅</span>
+          </el-menu-item>
+          <el-menu-item v-if="auth.isAuthenticated" index="/errands/publish">
+            <span class="menu-dot"></span>
+            <span>发布跑腿需求</span>
           </el-menu-item>
         </el-sub-menu>
 
@@ -102,6 +117,23 @@
           </el-breadcrumb>
         </div>
         <span class="header-right">
+          <div
+            v-if="auth.isAuthenticated"
+            class="msg-entry"
+            title="我的私信"
+            @click="$router.push({ name: 'Chat' })"
+          >
+            <span class="msg-label">消息</span>
+            <el-badge
+              :value="unreadTotal > 99 ? '99+' : unreadTotal"
+              :hidden="unreadTotal === 0"
+              class="msg-badge"
+            >
+              <el-icon :size="20" class="msg-icon">
+                <ChatDotRound />
+              </el-icon>
+            </el-badge>
+          </div>
           <span class="welcome-text">欢迎使用校园综合服务平台 👋</span>
         </span>
       </el-header>
@@ -110,20 +142,48 @@
         <router-view />
       </el-main>
     </el-container>
+
+    <!-- 全局智能客服 -->
+    <SmartSupport />
   </el-container>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { School, Goods, Briefcase, User, SwitchButton, Setting } from '@element-plus/icons-vue'
+import { getConversations } from '@/api/message'
+import SmartSupport from '@/components/SmartSupport.vue'
+import {
+  School, Goods, Briefcase, User, SwitchButton, Setting, Van, ChatDotRound
+} from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const showUserMenu = ref(false)
+
+// 顶栏未读徽标：30s 轮询会话列表（轻量聚合接口）
+const unreadTotal = ref(0)
+let unreadTimer = null
+async function refreshUnread() {
+  if (!auth.isAuthenticated) {
+    unreadTotal.value = 0
+    return
+  }
+  try {
+    const res = await getConversations()
+    unreadTotal.value = res.data.reduce((sum, c) => sum + c.unread, 0)
+  } catch (e) {
+    /* 401 已由拦截器处理 */
+  }
+}
+onMounted(() => {
+  refreshUnread()
+  unreadTimer = setInterval(refreshUnread, 30000)
+})
+onUnmounted(() => clearInterval(unreadTimer))
 
 const activeMenu = computed(() => route.path)
 
@@ -135,6 +195,9 @@ const breadcrumbMap = {
   '/favorites': '我的收藏',
   '/resume': '我的简历',
   '/interviews': 'AI 模拟面试',
+  '/errands': '跑腿大厅',
+  '/errands/publish': '发布跑腿需求',
+  '/chat': '我的私信',
   '/settings': '账号设置'
 }
 const currentBreadcrumb = computed(() => {
@@ -143,6 +206,7 @@ const currentBreadcrumb = computed(() => {
   if (path.startsWith('/resume/edit/')) return '简历编辑'
   if (path.startsWith('/interviews/') && path.endsWith('/report')) return '面试评估报告'
   if (path.startsWith('/interviews/')) return '面试对话'
+  if (path.startsWith('/errands/')) return '需求详情'
   return breadcrumbMap[path] || ''
 })
 
@@ -389,6 +453,45 @@ function goToSettings() {
 .header-left {
   display: flex;
   align-items: center;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.msg-badge {
+  display: flex;
+  align-items: center;
+}
+.msg-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.msg-entry:hover {
+  color: #ff6b00;
+}
+.msg-entry:hover .msg-icon {
+  color: #ff6b00;
+}
+.msg-label {
+  font-size: 13px;
+  color: #86909c;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.msg-entry:hover .msg-label {
+  color: #ff6b00;
+}
+.msg-icon {
+  color: #86909c;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.msg-icon:hover {
+  color: #ff6b00;
 }
 .welcome-text {
   font-size: 13px;

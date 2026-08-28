@@ -37,6 +37,57 @@
             </div>
           </el-upload>
         </div>
+        <!-- AI 分析按钮 -->
+        <div v-if="fileList.length > 0" class="ai-analyze-bar">
+          <el-button
+            type="primary"
+            plain
+            :loading="analyzing"
+            @click="doAnalyze"
+            class="ai-btn"
+          >
+            <el-icon><MagicStick /></el-icon>
+            {{ analyzing ? 'AI 分析中...' : 'AI 帮我写' }}
+          </el-button>
+          <span class="ai-hint">上传图片后，AI 自动识别商品信息</span>
+        </div>
+        <!-- AI 分析结果 -->
+        <div v-if="analysis.title" class="ai-result-card">
+          <div class="ai-result-header">
+            <el-icon><CircleCheck /></el-icon>
+            <span>AI 分析结果</span>
+          </div>
+          <div class="ai-result-body">
+            <div class="ai-result-row">
+              <span class="ai-label">标题</span>
+              <span class="ai-value">{{ analysis.title }}</span>
+            </div>
+            <div class="ai-result-row">
+              <span class="ai-label">分类</span>
+              <el-tag size="small">{{ analysis.category }}</el-tag>
+            </div>
+            <div class="ai-result-row">
+              <span class="ai-label">成色</span>
+              <el-tag size="small" type="info">{{ analysis.condition }}</el-tag>
+            </div>
+            <div class="ai-result-row">
+              <span class="ai-label">建议价</span>
+              <span class="ai-price">¥{{ analysis.suggested_price }}</span>
+              <span v-if="analysis.price_advice?.recommended" class="ai-price-range">
+                （参考区间 ¥{{ analysis.price_advice.min_price }}-{{ analysis.price_advice.max_price }}）
+              </span>
+            </div>
+            <div class="ai-result-desc">
+              <p>{{ analysis.description }}</p>
+            </div>
+            <div class="ai-result-desc" v-if="analysis.price_advice?.reasoning">
+              <p class="ai-reasoning">💡 {{ analysis.price_advice.reasoning }}</p>
+            </div>
+          </div>
+          <el-button type="primary" @click="applyAnalysis" class="ai-apply-btn">
+            一键填入表单
+          </el-button>
+        </div>
       </div>
 
       <!-- 标题 -->
@@ -127,8 +178,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Plus, Close } from '@element-plus/icons-vue'
-import { createGoods, updateGoods, getGoods, uploadImage, categories } from '@/api/goods'
+import { ArrowLeft, Plus, Close, MagicStick, CircleCheck } from '@element-plus/icons-vue'
+import { createGoods, updateGoods, getGoods, uploadImage, categories, analyzeGoods } from '@/api/goods'
 
 const route = useRoute()
 const router = useRouter()
@@ -136,6 +187,8 @@ const formRef = ref()
 const submitting = ref(false)
 const categoryList = ref([])
 const conditions = ['全新', '九成新', '八成新', '七成新', '五成新', '其他']
+const analyzing = ref(false)
+const analysis = ref({})
 
 const isEdit = computed(() => !!route.query.id)
 const fileList = ref([])
@@ -166,6 +219,43 @@ function onRemove(file) {
 }
 function onPreview(file) {
   window.open(file.url || file.name, '_blank')
+}
+
+async function doAnalyze() {
+  if (fileList.value.length === 0) {
+    ElMessage.warning('请先上传至少一张商品图片')
+    return
+  }
+  analyzing.value = true
+  try {
+    const res = await analyzeGoods({
+      image_urls: form.image_urls,
+      user_hint: form.description || '',
+    })
+    analysis.value = res.data || {}
+    ElMessage.success('AI 分析完成')
+  } catch (e) {
+    ElMessage.error('AI 分析失败，请稍后重试')
+    console.error(e)
+  } finally {
+    analyzing.value = false
+  }
+}
+
+function applyAnalysis() {
+  const a = analysis.value
+  if (a.title) form.title = a.title
+  if (a.description) form.description = a.description
+  if (a.category) {
+    // 确保分类在选项中，不在则添加
+    if (!categoryList.value.includes(a.category)) {
+      categoryList.value.push(a.category)
+    }
+    form.category = a.category
+  }
+  if (a.condition) form.condition = a.condition
+  if (a.suggested_price && a.suggested_price > 0) form.price = a.suggested_price
+  ElMessage.success('已填入表单')
 }
 
 async function submit() {
@@ -422,5 +512,85 @@ onMounted(async () => {
 }
 .publish-submit-btn:hover {
   background: linear-gradient(135deg, #ff5500, #ff7700) !important;
+}
+
+/* AI 分析 */
+.ai-analyze-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #eee;
+}
+.ai-btn {
+  border-radius: 16px;
+  font-size: 13px;
+}
+.ai-hint {
+  font-size: 12px;
+  color: #999;
+}
+.ai-result-card {
+  margin-top: 12px;
+  background: linear-gradient(135deg, #f0f7ff, #e6f3ff);
+  border: 1px solid #b3d8ff;
+  border-radius: 12px;
+  padding: 14px;
+}
+.ai-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 10px;
+}
+.ai-result-body {
+  font-size: 13px;
+  color: #333;
+}
+.ai-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ai-label {
+  color: #666;
+  font-weight: 500;
+  min-width: 50px;
+}
+.ai-value {
+  flex: 1;
+  font-weight: 600;
+  color: #333;
+}
+.ai-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ff4400;
+}
+.ai-price-range {
+  font-size: 12px;
+  color: #999;
+}
+.ai-result-desc {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 8px;
+  line-height: 1.6;
+}
+.ai-reasoning {
+  font-size: 12px;
+  color: #666;
+  margin: 0;
+}
+.ai-apply-btn {
+  width: 100%;
+  margin-top: 12px;
+  border-radius: 8px;
 }
 </style>

@@ -73,18 +73,36 @@ const routes = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'errands',
+        name: 'ErrandList',
+        component: () => import('@/views/errand/ErrandList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'errands/publish',
+        name: 'ErrandPublish',
+        component: () => import('@/views/errand/ErrandPublish.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'errands/:id',
+        name: 'ErrandDetail',
+        component: () => import('@/views/errand/ErrandDetail.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'chat/:userId?',
+        name: 'Chat',
+        component: () => import('@/views/chat/Chat.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
         meta: { requiresAuth: true }
       }
     ]
-  },
-  {
-    path: '/resume/edit/:id',
-    name: 'ResumeEditor',
-    component: () => import('@/views/resume/ResumeEditor.vue'),
-    meta: { requiresAuth: true, fullscreen: true }
   },
   {
     path: '/login',

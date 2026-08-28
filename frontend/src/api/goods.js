@@ -15,6 +15,7 @@ export const uploadImage = (file) => {
   })
 }
 
+export const analyzeGoods = (data) => request.post('/api/v1/goods/analyze', data)
 export const addFavorite = (id) => request.post(`/api/v1/favorites/${id}`)
 export const removeFavorite = (id) => request.delete(`/api/v1/favorites/${id}`)
 export const myFavorites = () => request.get('/api/v1/favorites')

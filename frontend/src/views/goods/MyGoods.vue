@@ -56,6 +56,7 @@
           <div class="card-meta">
             <span class="card-cat">{{ item.category }}</span>
             <span class="card-condition">{{ item.condition }}</span>
+            <span class="card-time" v-if="item.created_at">{{ formatTime(item.created_at) }}</span>
           </div>
           <div class="card-actions" @click.stop>
             <el-button size="small" text type="primary" @click="$router.push({ path: '/goods-publish', query: { id: item.id } })">
@@ -84,6 +85,15 @@ const loading = ref(false)
 const activeTab = ref('all')
 const statusMap = { on_sale: '在售', sold: '已售', off_shelf: '下架' }
 const statusType = { on_sale: 'success', sold: 'info', off_shelf: 'warning' }
+
+function formatTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const month = d.getMonth() + 1
+  const day = d.getDate()
+  const hour = d.getHours()
+  return `${month}月${day}日 ${hour}点`
+}
 
 const filteredList = computed(() => {
   if (activeTab.value === 'all') return list.value
@@ -249,6 +259,10 @@ onMounted(load)
   font-size: 12px;
   color: #999;
   margin-top: 4px;
+}
+.card-time {
+  color: #999;
+  font-size: 11px;
 }
 .card-actions {
   display: flex;

@@ -13,10 +13,20 @@ async def _fake_stream(resume_text, job_position, history):
 async def _fake_report(*args, **kwargs):
     return {
         "overall_score": 85,
-        "dimensions": [{"name": "表达逻辑", "score": 80, "comment": "结构清晰"}],
-        "strengths": ["项目经验扎实"],
-        "weaknesses": ["量化不足"],
-        "suggestions": ["补充数据"],
+        "hire_signal": "hire",
+        "summary": "整体表现稳定，量化意识好",
+        "dimensions": [{"name": "substance", "score": 4, "comment": "候选人提到「减少30%部署时间」"}],
+        "per_question": [
+            {
+                "index": 1,
+                "question": "请自我介绍",
+                "scores": {"substance": 4, "structure": 4, "relevance": 5, "credibility": 3, "differentiation": 3},
+                "strongest": "开场直接点出岗位匹配点",
+                "missed": "未展开量化数据来源",
+            }
+        ],
+        "patterns": {"crutch_phrases": ["我们"], "avoided_topics": [], "best_moment": "介绍项目量化成果", "worst_moment": ""},
+        "top_changes": ["回答带数字", "拆分个人贡献", "准备反问"],
     }
 
 
@@ -127,3 +137,18 @@ async def test_list(auth_client, mock_llm):
     assert resp.status_code == 200
     assert len(resp.json()) == 1
     assert resp.json()[0]["message_count"] == 1
+
+
+async def test_delete(auth_client, mock_llm):
+    resp = await auth_client.post("/api/v1/interviews", json={"job_position": "后端开发"})
+    interview_id = _parse_sse(resp.text)[0][1]["interview_id"]
+
+    # 删除后 204，列表为空
+    resp = await auth_client.delete(f"/api/v1/interviews/{interview_id}")
+    assert resp.status_code == 204
+    resp = await auth_client.get("/api/v1/interviews")
+    assert resp.json() == []
+
+    # 重复/再次访问 → 404
+    resp = await auth_client.delete(f"/api/v1/interviews/{interview_id}")
+    assert resp.status_code == 404

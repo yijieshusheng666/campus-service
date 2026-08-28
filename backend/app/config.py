@@ -1,5 +1,4 @@
 """应用配置：基于 pydantic-settings，从环境变量 / .env 读取。"""
-from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,7 +42,6 @@ class Settings(BaseSettings):
     OLLAMA_HOST: str = "http://localhost:11434"
 
     # --- CORS ---
-    # 默认仅放行本地开发前端；生产环境务必改为明确的站点来源列表
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property
@@ -62,9 +60,5 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
-
-
-settings = get_settings()
+# pydantic-settings 自带单例缓存，无需手动 lru_cache
+settings = Settings()

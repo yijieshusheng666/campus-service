@@ -1,12 +1,6 @@
-"""通用工具：分页、id 编码、上传文件安全。"""
+"""通用工具：上传文件安全。"""
 import secrets
-import uuid
 from pathlib import Path
-
-
-def new_id() -> str:
-    """对外暴露的短 id，避免暴露自增主键。"""
-    return uuid.uuid4().hex[:16]
 
 
 def safe_filename(original: str, prefix: str = "") -> str:

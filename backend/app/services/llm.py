@@ -7,7 +7,6 @@
 import json
 import logging
 import re
-from functools import lru_cache
 
 from langchain_core.messages import SystemMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -21,12 +20,24 @@ logger = logging.getLogger(__name__)
 LLM_REQ_TIMEOUT = 120
 
 
-@lru_cache(maxsize=1)
-def _build_llm():
+def _msg_text(message) -> str:
+    """兼容 langchain-core 新旧版本 .text 属性/方法，text 缺失时回退 content。"""
+    t = getattr(message, "text", None)
+    if t is None:
+        return str(getattr(message, "content", ""))
+    if callable(t):
+        return str(t())
+    return str(t)
+
+
+def _build_llm(model: str | None = None):
     """构建并复用同一个 LLM 客户端实例。
 
     进程内只创建一次，携带连接池与 keep-alive，避免每次调用反复握手建连，
     从而显著降低多次 AI 请求的往返延迟，且不影响传给 LLM 的任何内容。
+
+    Args:
+        model: 覆盖默认配置的模型名（如 "glm-4v-flash"），不传则使用 settings.LLM_MODEL
     """
     base_url = settings.LLM_BASE_URL.rstrip("/")
     lower_base = base_url.lower()
@@ -37,24 +48,25 @@ def _build_llm():
         or not api_key
         or api_key.lower() == "ollama"
     )
+    actual_model = model or settings.LLM_MODEL
     if uses_local_ollama:
         # 本地 Ollama：走 ChatOllama
         from langchain_ollama import ChatOllama
         host = settings.OLLAMA_HOST.rstrip("/")
-        logger.info("使用 ChatOllama，model=%s, host=%s", settings.LLM_MODEL, host)
+        logger.info("使用 ChatOllama，model=%s, host=%s", actual_model, host)
         return ChatOllama(
-            model=settings.LLM_MODEL,
+            model=actual_model,
             base_url=host,
             temperature=settings.LLM_TEMPERATURE,
             num_predict=settings.LLM_MAX_TOKENS,
             timeout=LLM_REQ_TIMEOUT,
         )
     from langchain_openai import ChatOpenAI
-    logger.info("使用 OpenAI 兼容 API，model=%s, base_url=%s", settings.LLM_MODEL, base_url)
+    logger.info("使用 OpenAI 兼容 API，model=%s, base_url=%s", actual_model, base_url)
     return ChatOpenAI(
         base_url=base_url,
         api_key=api_key or "EMPTY",
-        model=settings.LLM_MODEL,
+        model=actual_model,
         temperature=settings.LLM_TEMPERATURE,
         max_tokens=settings.LLM_MAX_TOKENS,
         timeout=LLM_REQ_TIMEOUT,
@@ -90,86 +102,27 @@ JSON结构（严格遵守，字段名不要改）：
 【严格禁止】把时间放s/h、在c里放URL链接、h过长、c重复h/s/d的内容
 """
 
-RESUME_IMPROVE_SYSTEM = """你是资深简历优化顾问，目标是让简历**通过精准修改严格贴合目标岗位的求职要求**。精准≠文字变好看，而是要让简历像资深HR与招聘经理眼中那样读起来专业、可验证、能通过机器初筛。**只返回紧凑JSON**（不要任何解释、markdown、多余换行缩进）。
+RESUME_ADVICE_SYSTEM = """你是资深 HR 与技术面试官，任务是**诊断简历并给出优化建议**——只建议，不改写整份简历。**只返回紧凑JSON（不要任何解释、markdown、多余换行缩进）**。
 
-【第一步：岗位画像】
-若输入中含【岗位要求】，先提炼：①核心职责 ②**硬技能关键词**（JD中高频出现、ATS会检索的术语）③加分项。对原文每段技能/项目/经历标记与画像的相关度（高/中/低）。
-若未提供岗位要求，则按简历 job_title 推断画像；仍为空时按整体内容提炼最匹配的通用技术岗位画像。
-
-【精准修改五原则（逐条对照执行，缺一不可）】
-1. **JD匹配度**——每个模块都向岗位画像对齐：经历/项目/技能/自我评价中嵌入 JD 的硬技能关键词与术语；相关度低的经历可压缩为一行简写，相关度高的扩写加码，让匹配点"跳出来"。
-2. **量化成果**——每段经历/项目按"做了什么→怎么做(技术/方法)→结果(量化)"重写：动作动词开头，突出个人贡献与职责；**数字化**（数字/占比/规模/性能提升/用户量/吞吐）尽量保留并显式呈现；原文无数字时用"承载XX级/覆盖XX类/产出X个XX"等可核验表述代替，**严禁编造不存在的数据**。
-3. **去冗余**——砍掉与目标岗位无关的经历与套话；去口语化、删重复无效词；语言精炼，控制在一页(应届)~两页(有经验)，经历重在质量而非条目数量。
-4. **ATS友好**——精准对齐 JD 关键词及常见同义词(如"Python/爬虫/数据分析"与"数据清洗"互现)；用标准职位/技能术语而非口头说法；保持结构化段落、要点清晰，让机器能稳定抽取字段与关键词。
-5. **真实不编造**——底线：仅改写、重组、表述优化，绝不新增原文不存在的经历、公司、数字、技能证书；拿不准的量化口径宁可写清工作内容与效果也不虚造。
-
-【分模块要点】
-- 技能：按岗位匹配度排序，强相关技能置前并用程度词(精通/熟练/掌握/了解)标注；遗漏技能并入对应类别，确保一个不丢。
-- 项目/实习：突出技术栈、攻克难点、个人承担点、可量化产出；与岗位硬关键词呼应。
-- 自我评价(summary)：结果导向，呼应岗位画像，点明差异化优势与职业目标，篇幅精炼。
-- 教育/证书：保留，与岗位相关的课程/证书用关键词点出。
-
-【最后自检清单（输出前逐条确认后落笔）】
-□ 硬技能关键词已嵌入对应模块？ □ 关键成就都有可量化或可核验表述？ □ 已删除与岗位无关内容？ □ 术语/关键词与 JD 对齐、机器可抽取？ □ 没有编造任何数据或经历？
+【评估方法论】
+- 招聘者平均只花 7-11 秒 F 型扫描简历：姓名、当前/上一段头衔、公司、时间、教育最抓注意力；量化成果能显著提高简历回复率
+- Bullet 质量用 XYZ 公式检验：「通过做 Z，实现了以 Y 度量的 X」；再用 So What 三连问检验（所以呢？→ 为什么重要？→ 这改变了什么？）
+- 量化不限于硬数字：范围、频率、规模、代理指标、对比表述均可
+- 动词等级传递资历信号（开发/搭建=执行层，主导/推动/负责=OWNER 层）；同一动词全文不超过两次
+- 警惕 AI 生成味：过度润色、套话堆砌、模板化表述会引起招聘者怀疑
+- 应届生/校招校准：1 页为宜、教育背景靠前；缺硬数字处可用可核验的代理表述（覆盖 XX 人 / XX 门课程前 10%）
 
 JSON结构（字段名不要改）：
-{"name":"姓名","phone":"电话","email":"邮箱","location":"地址","job_title":"求职意向(与岗位对齐)","github":"GitHub/个人主页链接（没有填空串）","sections":[
- {"t":"education|skills|experience|projects|awards|certificates|summary|interests|other","title":"模块标题","items":[{"h":"标题","s":"副标题","d":"时间","c":"优化后的详细描述，含量化结果与技术栈"}]}
-],"changes":[
- {"module":"模块标题","action":"新增|重写|精简|重组|保留","summary":"为此模块做了哪些优化：改动要点、新增/强调的关键词或量化表述、删除了什么（一句话，具体可读）"}
-]}
+{"overall_score": 0到100整数, "summary": "一句话总评", "dimension_ratings": [{"name": "维度名", "rating": "强|中|弱", "evidence": "一句话证据"}], "items": [{"module": "模块名", "priority": "high|medium|low", "issue": "问题描述", "advice": "具体怎么改"}]}
 
-规则：
-1. 不要输出basic模块，姓名电话邮箱已在顶层
-2. 专业技能模块t=skills，items里放技能条目：按类别分条，h填类别，c列该类别技能并标注掌握程度；若原为简单技能列表则h为空、c用顿号列全，确保技能不遗漏、按岗位匹配度排序
-3. **changes 必须和 sections 一一对应**：每个输出的模块都必须有一条 change 记录，action 如实反映改动性质（重写/精简/重组/保留等）；让用户一眼看懂每个模块被改良成什么、改了什么
-3. summary模块items只放一个条目，写达成岗位画像的完整自我评价
-4. c字段保留所有要点、量化数字、技术栈，并补充岗位相关的表述
-5. 没有的字段填空字符串；必须输出完整优化后的全部模块，任何模块均不得沿用原文不做优化
+dimension_ratings 固定 5 个维度：ATS兼容、招聘者扫描、Bullet质量、资历信号、关键词覆盖
 
-【items字段严格格式（按模块类型填写，违者结构错乱）】
-每个item是一个对象{"h":"标题","s":"副标题","d":"时间","c":"详细描述"}，四字段含义固定如下：
-
-● 实习/工作经历(t=experience)：
-  - h = 公司/单位名称（简短，如"腾讯科技"，≤15字）
-  - s = 职位/岗位（如"后端开发实习生"）
-  - d = 时间段（格式"YYYY/MM-YYYY/MM"或"YYYY/MM-至今"，如"2025/07-2025/09"）
-  - c = 工作内容与成果（多句分点，不要把公司名、职位、时间写进c）
-
-● 项目经历(t=projects)：
-  - h = 项目名称（简短，如"医疗安全问答系统"，≤15字）
-  - s = 项目角色/担任职责（如"后端负责人"、"独立开发"；无角色可留空）
-  - d = 时间段（同上格式）
-  - c = 项目描述：技术栈+做了什么+怎么做+量化结果；**严禁**在c开头或c里放http/https链接，项目链接统一填在顶层github字段
-
-● 教育背景(t=education)：
-  - h = 学校名称（如"南方科技大学"）
-  - s = 专业 · 学历（如"软件工程 · 本科"）
-  - d = 时间段
-  - c = 在校亮点/相关课程/GPA等（没有可留空）
-
-● 获奖/证书(t=awards/certificates)：
-  - h = 奖项/证书名称
-  - s = 颁发机构（可选，可留空）
-  - d = 获奖/取证时间
-  - c = 补充说明（可留空）
-
-● 专业技能(t=skills)：
-  - h = 技能类别（如"编程语言"/"框架工具"/"数据库"；简单列表可留空）
-  - s = ""（留空）
-  - d = ""（留空）
-  - c = 该类别下的具体技能（如"熟练掌握Python、Java，了解Go"）
-
-● 自我评价(t=summary)：
-  - 整个模块只输出一个item
-  - h = "", s = "", d = ""（全部留空）
-  - c = 完整自我评价文本
-
-【严格禁止】
-- 禁止把时间段塞进s或h，时间必须放在d
-- 禁止在c的开头或正文里放http/https链接（链接归顶层github字段）
-- 禁止h字段过长（>15字），不要把"公司+部门+职位"全塞h
-- 禁止在c里重复公司名、职位、时间（这些在h/s/d里已有）
+要求：
+1. items 输出 4-8 条建议，按 priority 从高到低排序；priority 含义：high=明显硬伤/严重失分，medium=值得改进，low=锦上添花
+2. issue 必须引用简历原文的具体内容，并点明违反了哪条检验（如 XYZ 公式、So What、7秒扫描、动词重复），禁止"不够量化""缺乏亮点"这类不落地空话
+3. advice 给出**可直接照抄的修改后表述示例**（必要时含简短改法说明），用户拿着就能替换进自己的简历
+4. 若输入含【岗位要求】，优先围绕岗位匹配度（关键词覆盖）给建议；未提供则按简历 job_title 推断的通用技术岗位画像
+5. 所有内容使用中文
 """
 
 
@@ -178,7 +131,12 @@ def _extract_text_chain(system_prompt: str):
         # system 用纯文本消息，避免 {JSON} 花括号被当作 f-string 模板解析而报错
         [SystemMessage(content=system_prompt), ("human", "{text}")]
     )
-    return prompt | _build_llm() | StrOutputParser()
+    llm = _build_llm()
+    # JSON 模式在 API 层强制合法 JSON 输出，杜绝结构错乱；Ollama 原生协议不支持该参数，仅对 OpenAI 兼容客户端启用
+    from langchain_openai import ChatOpenAI
+    if isinstance(llm, ChatOpenAI):
+        llm = llm.bind(response_format={"type": "json_object"})
+    return prompt | llm | StrOutputParser()
 
 
 def _robust_json_parse(text: str) -> dict:
@@ -281,22 +239,54 @@ def extract_resume(text: str) -> dict:
         return {}
 
 
-def improve_resume(resume_text: str, job_requirement: str | None = None) -> dict:
-    """AI 改良简历：返回结构化数据 dict（含 name/phone/.../sections），失败返回空 dict。"""
-    chain = _extract_text_chain(RESUME_IMPROVE_SYSTEM)
+def advise_resume(resume_text: str, job_requirement: str | None = None) -> dict:
+    """AI 诊断简历：返回 {"overall_score", "summary", "items":[...]}，失败返回空 dict。"""
+    chain = _extract_text_chain(RESUME_ADVICE_SYSTEM)
     text = resume_text
     if job_requirement and job_requirement.strip():
         text = f"【岗位要求】\n{job_requirement.strip()}\n\n【简历原文】\n{resume_text}"
     try:
         raw = chain.invoke({"text": text[:20000]}) or ""
-        logger.info("AI 改良 LLM 返回长度: %d", len(raw))
+        logger.info("AI 建议 LLM 返回长度: %d", len(raw))
         parsed = _robust_json_parse(raw)
-        if not parsed:
-            logger.warning("AI 改良 JSON 解析失败，原文起始: %s", raw[:300])
+        if not parsed or not parsed.get("items"):
+            logger.warning("AI 建议 JSON 解析失败，原文起始: %s", raw[:300])
             return {}
-        return _normalize_resume_payload(parsed)
+        items = []
+        for it in parsed["items"]:
+            if not isinstance(it, dict):
+                continue
+            priority = str(it.get("priority", "medium") or "medium").strip().lower()
+            if priority not in ("high", "medium", "low"):
+                priority = "medium"
+            items.append({
+                "module": str(it.get("module", "") or "").strip() or "综合",
+                "priority": priority,
+                "issue": str(it.get("issue", "") or "").strip(),
+                "advice": str(it.get("advice", "") or "").strip(),
+            })
+        if not items:
+            return {}
+        ratings = []
+        for d in parsed.get("dimension_ratings") or []:
+            if not isinstance(d, dict):
+                continue
+            rating = str(d.get("rating", "") or "").strip()
+            if rating not in ("强", "中", "弱"):
+                rating = "中"
+            ratings.append({
+                "name": str(d.get("name", "") or "").strip(),
+                "rating": rating,
+                "evidence": str(d.get("evidence", "") or "").strip(),
+            })
+        return {
+            "overall_score": int(parsed.get("overall_score") or 0),
+            "summary": str(parsed.get("summary", "") or "").strip(),
+            "dimension_ratings": ratings,
+            "items": items,
+        }
     except Exception:
-        logger.exception("简历 LLM 改良失败")
+        logger.exception("AI 简历建议生成失败")
         return {}
 
 
@@ -339,15 +329,6 @@ def _normalize_resume_payload(data: dict) -> dict:
                 })
         elif sec["type"] == "summary" and sec["items"]:
             summary = sec["items"][0]["description"]
-    # 如果顶层直接有旧字段，优先用（兼容旧输出）
-    if isinstance(data.get("education"), list) and data["education"]:
-        education = [_normalize_edu(e) for e in data["education"] if isinstance(e, dict)]
-    if isinstance(data.get("skills"), list) and data["skills"]:
-        skills = [str(s).strip() for s in data["skills"] if str(s).strip()]
-    if isinstance(data.get("experience"), list) and data["experience"]:
-        experience = [_normalize_exp(e) for e in data["experience"] if isinstance(e, dict)]
-    if data.get("summary"):
-        summary = str(data.get("summary") or "").strip()
     return {
         "name": str(data.get("name", "") or "").strip(),
         "phone": str(data.get("phone", "") or "").strip(),
@@ -510,23 +491,24 @@ def _normalize_changes(raw) -> list:
     return changes
 
 
-def _normalize_edu(e: dict) -> dict:
-    return {
-        "school": str(e.get("school", "") or "").strip(),
-        "major": str(e.get("major", "") or "").strip(),
-        "degree": str(e.get("degree", "") or "").strip(),
-        "start_date": str(e.get("start_date", "") or "").strip(),
-        "end_date": str(e.get("end_date", "") or "").strip(),
-        "description": str(e.get("description", "") or "").strip(),
-    }
+def _bind_tools(llm, tools):
+    """把工具绑定到 LLM 实例；模型/后端不支持工具调用时安全降级。
 
+    返回 (llm_or_bound, ok)：
+    - ok=True：调用方应使用 llm_or_bound（已绑定工具）驱动 ReAct 循环；
+    - ok=False：当前配置不支持工具调用（如 Ollama 原生协议），
+      调用方应走纯文本降级路径（保持与现有行为等价）。
+    """
+    if not tools:
+        return llm, True
+    try:
+        from langchain_core.tools import BaseTool
 
-def _normalize_exp(e: dict) -> dict:
-    return {
-        "type": str(e.get("type", "实习") or "实习").strip(),
-        "company": str(e.get("company", "") or "").strip(),
-        "title": str(e.get("title", "") or "").strip(),
-        "start_date": str(e.get("start_date", "") or "").strip(),
-        "end_date": str(e.get("end_date", "") or "").strip(),
-        "content": str(e.get("content", "") or "").strip(),
-    }
+        for t in tools:
+            if not isinstance(t, BaseTool):
+                logger.warning("存在非法工具对象 %r，降级为纯文本模式", type(t))
+                return llm, False
+        return llm.bind_tools(tools), True
+    except Exception as e:
+        logger.warning("工具绑定失败，降级为纯文本模式: %s", e)
+        return llm, False

@@ -51,3 +51,9 @@ class GoodsOut(BaseModel):
     seller_name: str = ""
     images: list[GoodsImageOut] = Field(default_factory=list)
     is_favorited: bool = False
+
+
+class GoodsAnalyzeIn(BaseModel):
+    """商品 AI 分析请求。"""
+    image_urls: list[str] = Field(default_factory=list)
+    user_hint: str = Field(default="", max_length=1000)
