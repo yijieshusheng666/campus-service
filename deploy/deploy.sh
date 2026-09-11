@@ -40,15 +40,33 @@ id "$RUN_USER" >/dev/null 2>&1 || die "系统用户 $RUN_USER 不存在，见 do
 [ -f "$BACKEND_DIR/.env" ] || die "$BACKEND_DIR/.env 不存在。先 cp .env.example .env 并填写，见 docs/部署手册.md 第三节"
 command -v nginx >/dev/null || die "nginx 未安装"
 command -v node  >/dev/null || die "node 未安装"
-command -v python3.11 >/dev/null || die "python3.11 未安装（Ubuntu 22.04 自带 3.10，需按手册装 3.11）"
 grep -q '^\(DB_PASSWORD\|LLM_API_KEY\|SECRET_KEY\)=' "$BACKEND_DIR/.env" || die ".env 缺少必要字段"
-grep -q 'CHANGE_ME' "$BACKEND_DIR/.env" && warn ".env 里 SECRET_KEY 还是默认值，公网环境务必换掉"
+if grep -q 'CHANGE_ME' "$BACKEND_DIR/.env"; then
+    warn ".env 里 SECRET_KEY 还是默认值，公网环境务必换掉"
+fi
+
+# 挑选可用的 Python 解释器：优先 3.11（与本机开发环境一致），否则退回 3.10。
+# Ubuntu 22.04 自带的就是 3.10，而 3.11 要走 launchpad 上的 deadsnakes 第三方源，
+# 国内网络未必拉得动。已扫过 app/ 全目录确认项目没用任何 3.11 专属特性
+# （datetime.UTC / TaskGroup / tomllib / except* / typing.Self 全无），
+# 所以 3.10 完全可跑 —— 能省掉这个不确定环节就省掉。
+PY_BIN=""
+for cand in python3.11 python3.12 python3.10 python3; do
+    command -v "$cand" >/dev/null 2>&1 || continue
+    ver=$("$cand" -c 'import sys;print("%d%02d"%sys.version_info[:2])' 2>/dev/null || echo 0)
+    case "$ver" in ''|*[!0-9]*) continue ;; esac
+    [ "$ver" -ge 310 ] || continue
+    PY_BIN=$(command -v "$cand")
+    break
+done
+[ -n "$PY_BIN" ] || die "找不到 Python 3.10 或更高版本，请先安装"
+ok "使用 Python：$PY_BIN（$("$PY_BIN" -V 2>&1)）"
 ok "环境检查通过"
 
 # ---------------- 1. Python 虚拟环境 ----------------
 step "1/6 同步后端依赖"
 if [ ! -x "$VENV_DIR/bin/python" ]; then
-    as_user python3.11 -m venv "$VENV_DIR"
+    as_user "$PY_BIN" -m venv "$VENV_DIR"
     ok "已创建虚拟环境 $VENV_DIR"
 fi
 as_user "$VENV_DIR/bin/python" -m pip install --upgrade pip -q
