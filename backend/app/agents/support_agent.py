@@ -26,6 +26,7 @@ from typing import Any, AsyncGenerator, Callable
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+from app.agents.goods_agent import _image_url_to_base64_dataurl
 from app.agents.support_state import (
     PublishGoodsPhase,
     SupportSessionState,
@@ -38,6 +39,7 @@ from app.agents.support_tools import (
     generate_publish_payload,
     reset_to_idle,
 )
+from app.config import settings
 from app.services.llm import _build_llm, _msg_text
 
 logger = logging.getLogger(__name__)
@@ -366,8 +368,16 @@ async def _handle_publish_goods(
     )
 
 
-async def _general_chat(user_id: int, question: str) -> str:
-    """v1 通用问答：嵌入式 RAG + 会话记忆（LLM 生成文本）。"""
+async def _general_chat(
+    user_id: int,
+    question: str,
+    image_urls: list[str] | None = None,
+) -> str:
+    """v1 通用问答：嵌入式 RAG + 会话记忆（LLM 生成文本）。
+
+    带图片时自动切换视觉模型（settings.LLM_VISION_MODEL）——文本模型收到
+    image_url 内容块会直接报错或忽略，这是普通客服「看不见图」的根因。
+    """
     history = _get_session(user_id)
 
     msgs: list[BaseMessage] = [SystemMessage(content=SUPPORT_SYSTEM)]
@@ -375,13 +385,15 @@ async def _general_chat(user_id: int, question: str) -> str:
         trimmed = _trim_history(history)
         for m in trimmed[1:]:
             msgs.append(m)
-    msgs.append(HumanMessage(content=question))
+    _append_question_message(msgs, question, image_urls)
+    use_vision = bool(image_urls)
 
     try:
-        llm = _build_llm()
+        llm = _build_llm(settings.LLM_VISION_MODEL) if use_vision else _build_llm()
         raw = await llm.ainvoke(msgs)
         answer = _msg_text(raw)
 
+        # 会话记忆只存文本：多模态内容体积大（base64），且重放给下一轮的文本模型会报错
         history.append(HumanMessage(content=question))
         history.append(AIMessage(content=answer))
         _session_last_active[user_id] = datetime.now()
@@ -455,8 +467,47 @@ def clear_history(user_id: int) -> None:
 
 # ==================== v3：SSE 流式输出 ====================
 
-async def _general_chat_stream(user_id: int, question: str) -> AsyncGenerator[dict, None]:
-    """v1 通用问答流式版：流式生成 AI 回复文本，同时写入会话记忆。"""
+def _support_multimodal_content(image_urls: list[str], question: str) -> list[dict]:
+    """构建普通客服对话的多模态消息内容（图片转 base64，视觉模型无需联网即可看图）。
+
+    与 goods_agent._make_multimodal_content 的区别：那边是「生成商品发布 JSON」的
+    专用提示词，这里是通用问答——文本部分就是用户原话，不做任务导向的改写。
+    图片 base64 转换失败的会被静默跳过（goods_agent 的转换函数内部已记日志）。
+    """
+    content: list[dict] = []
+    text = question.strip() or "请看这张图片，告诉我图片里有什么，以及平台能怎么帮我处理。"
+    content.append({"type": "text", "text": text})
+    for url in image_urls:
+        if not url:
+            continue
+        data_url = _image_url_to_base64_dataurl(url)
+        if data_url:
+            content.append({"type": "image_url", "image_url": {"url": data_url}})
+        else:
+            logger.warning("客服对话图片转 base64 失败，已跳过: %s", url)
+    return content
+
+
+def _append_question_message(msgs: list[BaseMessage], question: str, image_urls: list[str] | None) -> None:
+    """把用户本轮输入追加为 HumanMessage；带图片时构建多模态内容。
+
+    返回值约定：调用方据此决定用文本模型还是视觉模型
+    （见 _general_chat / _general_chat_stream 中的 `use_vision`）。
+    """
+    if image_urls:
+        msgs.append(HumanMessage(content=_support_multimodal_content(image_urls, question)))
+    else:
+        msgs.append(HumanMessage(content=question))
+
+async def _general_chat_stream(
+    user_id: int,
+    question: str,
+    image_urls: list[str] | None = None,
+) -> AsyncGenerator[dict, None]:
+    """v1 通用问答流式版：流式生成 AI 回复文本，同时写入会话记忆。
+
+    带图片时切换视觉模型（与 _general_chat 同一套逻辑）。
+    """
     history = _get_session(user_id)
 
     msgs: list[BaseMessage] = [SystemMessage(content=SUPPORT_SYSTEM)]
@@ -464,17 +515,19 @@ async def _general_chat_stream(user_id: int, question: str) -> AsyncGenerator[di
         trimmed = _trim_history(history)
         for m in trimmed[1:]:
             msgs.append(m)
-    msgs.append(HumanMessage(content=question))
+    _append_question_message(msgs, question, image_urls)
+    use_vision = bool(image_urls)
 
     full_answer = ""
     try:
-        llm = _build_llm()
+        llm = _build_llm(settings.LLM_VISION_MODEL) if use_vision else _build_llm()
         async for chunk in llm.astream(msgs):
             text = _msg_text(chunk)
             if text:
                 full_answer += text
                 yield {"type": "delta", "text": text}
 
+        # 会话记忆只存文本（同 _general_chat：base64 体积大且不能重放给文本模型）
         history.append(HumanMessage(content=question))
         history.append(AIMessage(content=full_answer))
         _session_last_active[user_id] = datetime.now()
@@ -546,5 +599,5 @@ async def agent_chat_stream(
             yield event
         return
 
-    async for event in _general_chat_stream(user_id, question):
+    async for event in _general_chat_stream(user_id, question, image_urls):
         yield event
