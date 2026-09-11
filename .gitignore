@@ -4,6 +4,9 @@
 .env.*.local
 !.env.example
 
+# ===== AI 助手工作区（含本地笔记与缓存，不入仓库） =====
+.workbuddy/
+
 # ===== 后端 =====
 __pycache__/
 *.py[cod]

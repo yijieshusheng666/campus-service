@@ -22,7 +22,9 @@ from app.services.llm import _build_llm, _msg_text
 
 logger = logging.getLogger(__name__)
 
-VISION_MODEL = "glm-4v-flash"  # 智谱免费视觉模型，OpenAI 兼容接口
+# 视觉模型：从配置读取（backend/.env 的 LLM_VISION_MODEL），不再硬编码。
+# 默认 glm-4v-flash 是智谱的云端多模态模型；若改成 Ollama 本地模型需自行确认该模型支持图片输入。
+VISION_MODEL = settings.LLM_VISION_MODEL
 
 # 商品发布助手 system prompt（针对视觉模型优化）
 AGENT_SYSTEM = """你是一位校园二手交易平台的商品发布助手。请根据卖家上传的商品图片和文字描述，准确识别商品信息并生成专业的发布内容。

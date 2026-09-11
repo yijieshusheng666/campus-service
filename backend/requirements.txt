@@ -1,36 +1,55 @@
-# ---- Web 框架 ----
+# NOTE: keep this file ASCII-only.
+# pip reads requirements files using the *system locale* encoding
+# (GBK / cp936 on Chinese Windows), so any non-ASCII comment makes
+# `pip install -r requirements.txt` fail with UnicodeDecodeError.
+
+# ---- Web framework ----
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 python-multipart==0.0.19
 
-# ---- 数据库：MySQL 异步 ----
+# ---- Database: MySQL (async driver) ----
 sqlalchemy[asyncio]==2.0.36
 asyncmy==0.2.10
 pymysql==1.1.1
 alembic==1.14.1
 
-# ---- 数据校验 ----
+# ---- Validation ----
 pydantic==2.10.4
 pydantic-settings==2.7.0
 email-validator==2.2.0
 
-# ---- 安全 ----
+# ---- Security ----
+# NOTE: do NOT upgrade bcrypt. passlib 1.7.4 is incompatible with bcrypt>=5.0
+# and the login endpoint will return HTTP 500.
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyJWT==2.10.1
+# cryptography: NOT a dependency of asyncmy on paper (asyncmy declares no
+# Requires-Dist at all), but asyncmy/auth.py raises
+#   RuntimeError: 'cryptography' package is required for sha256_password
+#                   or caching_sha2_password auth methods
+# on any non-SSL connection to a MySQL 8 server, because caching_sha2_password
+# (MySQL 8's default plugin) needs RSA public-key encryption to finish the
+# handshake. A fresh `pip install -r requirements.txt` without this pin cannot
+# connect to MySQL 8, and the traceback points nowhere near the real cause.
+cryptography==50.0.0
 
 # ---- LangChain ----
 langchain==0.3.13
+# langchain-core is imported directly by several modules (agents/, services/),
+# so it is pinned explicitly instead of relying on langchain's transitive dep.
+langchain-core==0.3.63
 langchain-openai==0.2.14
 langchain-ollama==0.2.2
 
 # ---- PDF ----
 pdfplumber==0.11.1
 
-# ---- 其他 ----
+# ---- Misc ----
 httpx==0.28.1
 
-# ---- 测试 ----
+# ---- Tests ----
 pytest==8.3.4
 pytest-asyncio==0.25.0
 aiosqlite==0.20.0

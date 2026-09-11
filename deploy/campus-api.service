@@ -1,0 +1,52 @@
+# ============================================================
+# 校园综合服务平台 —— 后端 systemd 服务
+# 放置路径：/etc/systemd/system/campus-api.service
+#
+# 启用：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now campus-api
+#   sudo systemctl status campus-api
+# ============================================================
+
+[Unit]
+Description=Campus Platform API (FastAPI + uvicorn)
+Documentation=https://github.com/yijieshusheng666
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=campus
+Group=campus
+WorkingDirectory=/opt/campus/backend
+
+# 所有生产密钥都在这里（DB 密码 / JWT SECRET_KEY / LLM_API_KEY）
+# 权限设成 600，且绝不进 Git
+EnvironmentFile=/opt/campus/backend/.env
+
+# ★ 只监听 127.0.0.1，不监听 0.0.0.0 ★
+# 公网入口一律走 Nginx 的 80 端口。若这里监听 0.0.0.0:8001，
+# 别人就能绕过 Nginx 直接打你的后端，阿里云安全组一旦漏开端口就裸奔了。
+#
+# ★ workers 固定为 1，不要改大 ★
+# 本项目有两处状态放在「进程内存」里，多 worker 会直接出错：
+#   1) app/api/ws.py 的 ConnectionManager：用户 A 连在 worker1、用户 B 连在 worker2，
+#      B 给 A 发私信时，worker2 的连接表里找不到 A，消息推送不到（消息已落库不丢，但实时性没了）
+#   2) app/api/resumes.py:28 用 asyncio.create_task 跑简历解析，任务只活在当前进程
+# 流量大了要扩容的话，得先把这两处挪到 Redis（连接表）和任务队列（解析任务），
+# 而不是简单地把 --workers 调大。
+ExecStart=/opt/campus/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips='127.0.0.1'
+
+Restart=always
+RestartSec=5
+
+# 崩溃重启的日志上限，防止疯狂重启刷爆磁盘
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=campus-api
+
+[Install]
+WantedBy=multi-user.target

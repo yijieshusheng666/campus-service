@@ -50,6 +50,15 @@ def _build_llm(model: str | None = None):
     )
     actual_model = model or settings.LLM_MODEL
     if uses_local_ollama:
+        # 失败定位：api_key 为空是最常见的误配置（用户只改了 base_url 忘了填 Key），
+        # 此时会被静默判定为本地 Ollama，最终报 "All connection attempts failed"，
+        # 很容易被误当成网络故障。这里显式告警，避免绕圈排查。
+        if not api_key:
+            logger.warning(
+                "LLM_API_KEY 为空，已按「本地 Ollama」处理（host=%s, model=%s）。"
+                "若你本意是调用云端模型，请在 backend/.env 填上 LLM_API_KEY。",
+                settings.OLLAMA_HOST, actual_model,
+            )
         # 本地 Ollama：走 ChatOllama
         from langchain_ollama import ChatOllama
         host = settings.OLLAMA_HOST.rstrip("/")
