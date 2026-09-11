@@ -74,7 +74,13 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 as_user "$VENV_DIR/bin/python" -m pip install --upgrade pip -q
 # 每次全新解析 requirements.txt，服务器上这份环境不会像本地那样被别的项目污染
-as_user "$VENV_DIR/bin/python" -m pip install -r "$BACKEND_DIR/requirements.txt" -q
+#
+# --timeout/--retries：pip 默认单次读超时只有 15 秒，国内网络从 PyPI 官方源
+# 拉 LangChain 这类大包极易抛 ReadTimeoutError（files.pythonhosted.org 超时）。
+# 这里放宽超时并加重试。根治办法是配国内镜像源 —— 见 docs/部署手册.md 第 2.2 节，
+# /etc/pip.conf 里指定 index-url 后速度会有数量级差别。
+PIP_OPTS=(--timeout 120 --retries 5)
+as_user "$VENV_DIR/bin/python" -m pip install "${PIP_OPTS[@]}" -r "$BACKEND_DIR/requirements.txt" -q
 ok "依赖安装完成"
 
 # 光装依赖不够：asyncmy 连 MySQL 8 的 caching_sha2_password 需要 cryptography，
