@@ -448,4 +448,24 @@ onMounted(() => loadHistory())
 
 .support-fade-enter-active, .support-fade-leave-active { transition: all 0.25s ease; }
 .support-fade-enter-from, .support-fade-leave-to { opacity: 0; transform: translateY(12px) scale(0.96); }
+
+/* ===== 移动端适配 ===== */
+@media (max-width: 640px) {
+  /* 悬浮按钮往屏幕内收一点，避免被边缘裁掉 */
+  .smart-support { bottom: 16px; right: 12px; }
+
+  /* 400px 宽的聊天窗在 375px 的手机上会直接超出可视区域，
+     改成几乎撑满全屏（左右各留 12px），高度用视口高度封顶 */
+  .support-chat-box {
+    width: calc(100vw - 24px);
+    height: min(72vh, 560px);
+    right: 0;
+    bottom: 72px;
+    border-radius: 14px;
+  }
+  .support-header { padding: 12px 14px; }
+  .support-body { padding: 12px; }
+  /* 气泡占比放宽，小屏上 78% 的限宽会让文字过早换行 */
+  .msg-content { max-width: 86%; }
+}
 </style>

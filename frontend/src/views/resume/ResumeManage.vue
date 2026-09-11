@@ -5,16 +5,25 @@
         <div class="card-header">
           <b>我的简历</b>
           <div class="header-actions">
-            <el-upload :show-file-list="false" accept=".pdf" :before-upload="beforeUpload" :http-request="onUpload">
+            <!-- accept 同时写扩展名和 MIME：
+                 手机浏览器的文件选择器对过滤规则的处理参差不齐，
+                 只写 ".pdf" 时部分安卓机型会把文档目录整个过滤掉，
+                 表现就是「找不到 PDF 文件」。两种写法都给，兼容性最好。 -->
+            <el-upload
+              :show-file-list="false"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              :before-upload="beforeUpload"
+              :http-request="onUpload"
+            >
               <el-button type="primary" :loading="uploading">
                 <el-icon style="margin-right:4px"><DocumentAdd /></el-icon>
-                {{ uploading ? '解析中...' : '上传 PDF 简历' }}
+                {{ uploading ? '解析中...' : '上传简历' }}
               </el-button>
             </el-upload>
           </div>
         </div>
       </template>
-      <p class="tips">上传 PDF 简历后，点击「AI 优化建议」获取针对简历内容的诊断与修改建议；建议保存在平台上，可随时查看。</p>
+      <p class="tips">上传 PDF 或 Word(.docx) 简历，AI 会自动解析出结构化信息；点击「AI 优化建议」获取针对简历内容的诊断与修改建议，建议保存在平台上可随时查看。注意：扫描件/纯图片型 PDF 提不出文字，暂不支持；旧版 .doc 请先另存为 .docx。</p>
     </el-card>
 
     <el-empty v-if="!loading && !resumes.length" description="暂无简历，请先上传" />
@@ -47,7 +56,9 @@
             </div>
           </div>
           <div class="resume-actions">
-            <el-button v-if="r.pdf_url" plain @click="openPdf(r)">查看原PDF</el-button>
+            <!-- Word 文件浏览器无法在线预览，打开只会触发下载，所以按钮文案分开 -->
+            <el-button v-if="isPdf(r) && r.pdf_url" plain @click="openPdf(r)">查看原PDF</el-button>
+            <el-button v-else-if="r.pdf_url" plain @click="openPdf(r)">下载原文件</el-button>
             <el-button type="primary" plain :disabled="r.parse_status !== 'completed'" :loading="advisingId === r.id" @click="openAdvice(r)">AI 优化建议</el-button>
             <el-button type="danger" plain @click="onDelete(r)">删除</el-button>
           </div>
@@ -128,10 +139,17 @@ const priorityLabel = (p) => ({ high: '高优先级', medium: '中优先级', lo
 
 const ratingTagType = (rating) => ({ 强: 'success', 中: 'warning', 弱: 'danger' }[rating] || 'info')
 
+function isPdf(r) {
+  return (r.file_name || '').toLowerCase().endsWith('.pdf')
+}
+
 function beforeUpload(file) {
-  const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-  if (!isPDF) {
-    ElMessage.error('只能上传 PDF 文件！')
+  // 手机浏览器从文件管理器选文件时 file.type 经常是空字符串，
+  // 所以这里只认扩展名，不依赖 MIME —— 依赖 MIME 会在手机上误杀合法文件
+  const name = (file.name || '').toLowerCase()
+  const ok = name.endsWith('.pdf') || name.endsWith('.docx')
+  if (!ok) {
+    ElMessage.error('仅支持 PDF 或 Word(.docx) 文件')
     return false
   }
   uploading.value = true

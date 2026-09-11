@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.config import settings
-from app.core.utils import ALLOWED_PDF_EXT, safe_filename
+from app.core.utils import ALLOWED_RESUME_EXT, looks_like_docx, looks_like_pdf, safe_filename
 from app.database import AsyncSessionLocal, get_db
 from app.models.resume import ParseStatus, Resume
 from app.models.user import User
@@ -105,6 +105,26 @@ def _extract_pdf_text(pdf_path: Path) -> str:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
+def _extract_docx_text(docx_path: Path) -> str:
+    """提取 Word(.docx) 全文。
+
+    简历非常爱用【表格】排版（基本信息一行三格那种），只遍历 paragraphs
+    会把表格里的内容整个漏掉 —— 那样解析出来的简历就缺姓名电话，
+    所以表格单元格也必须遍历。
+    """
+    from docx import Document
+
+    doc = Document(str(docx_path))
+    parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                text = cell.text.strip()
+                if text:
+                    parts.append(text)
+    return "\n".join(parts)
+
+
 def _build_vector_text(resume: Resume) -> str:
     """构造简历语义向量文本：基础信息 + 动态模块内容 + 介绍。"""
     parts = []
@@ -158,25 +178,43 @@ async def upload_resume(
     user: User = Depends(get_current_user),
 ):
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_PDF_EXT:
-        raise HTTPException(status_code=400, detail="仅支持 PDF 简历")
+    if suffix == ".doc":
+        # 旧版二进制格式，解析要靠外部程序，明确拒绝并告诉用户怎么办，
+        # 比含糊地报「仅支持 PDF」体验好得多
+        raise HTTPException(
+            status_code=400,
+            detail="暂不支持旧版 .doc 格式，请用 Word/WPS 另存为 .docx 后再上传",
+        )
+    if suffix not in ALLOWED_RESUME_EXT:
+        raise HTTPException(status_code=400, detail="仅支持 PDF 或 Word(.docx) 简历")
+
     content = await file.read(settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024 + 1)
     if len(content) > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件超过大小限制")
-    if not content[:16].startswith(b"%PDF-"):
+
+    # 按内容二次校验：扩展名可以随便改，文件头骗不了人
+    if suffix == ".pdf" and not looks_like_pdf(content[:16]):
         raise HTTPException(status_code=400, detail="文件内容不是有效的 PDF")
+    if suffix == ".docx" and not looks_like_docx(content[:16]):
+        raise HTTPException(
+            status_code=400,
+            detail="文件内容不是有效的 Word 文档（.docx 本质是 ZIP 容器），请确认没有手动改过扩展名",
+        )
 
     # 保存本地
     filename = safe_filename(file.filename or "resume.pdf", prefix="resume_")
     file_path = _ensure_resume_dir() / filename
     file_path.write_bytes(content)
 
-    # PDF 文本提取（同步 IO 放入线程池，避免阻塞事件循环）
+    # 文本提取是同步 IO，放入线程池避免阻塞事件循环；两种格式各走各的解析器
     try:
-        raw_text = await asyncio.to_thread(_extract_pdf_text, file_path)
+        if suffix == ".pdf":
+            raw_text = await asyncio.to_thread(_extract_pdf_text, file_path)
+        else:
+            raw_text = await asyncio.to_thread(_extract_docx_text, file_path)
     except Exception as e:
         file_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"PDF 解析失败：{e}") from e
+        raise HTTPException(status_code=400, detail=f"文档解析失败：{e}") from e
 
     if not raw_text.strip():
         file_path.unlink(missing_ok=True)

@@ -43,8 +43,11 @@ langchain-core==0.3.63
 langchain-openai==0.2.14
 langchain-ollama==0.2.2
 
-# ---- PDF ----
+# ---- PDF / Word ----
 pdfplumber==0.11.1
+# 简历支持 .docx。只支持新版格式：旧版 .doc 是二进制专有格式，
+# 解析需要 antiword / LibreOffice 这类外部依赖，不值当，改为提示用户另存
+python-docx==1.1.2
 
 # ---- Misc ----
 httpx==0.28.1
