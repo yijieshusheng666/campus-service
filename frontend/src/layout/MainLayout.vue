@@ -1,6 +1,9 @@
 <template>
   <el-container class="layout">
-    <el-aside width="220px" class="aside">
+    <!-- 移动端抽屉的遮罩：桌面端 display:none，小屏且有 .show 时才出现 -->
+    <div class="aside-mask" :class="{ show: mobileOpen }" @click="mobileOpen = false" />
+
+    <el-aside width="220px" class="aside" :class="{ open: mobileOpen }">
       <!-- Logo区域 -->
       <div class="logo-area">
         <div class="logo-icon">
@@ -11,6 +14,9 @@
           <p>Campus Service</p>
         </div>
       </div>
+
+      <!-- 只在移动端出现的关闭按钮（桌面端 display:none） -->
+      <el-icon class="aside-close" :size="20" @click="mobileOpen = false"><Close /></el-icon>
 
       <!-- 导航菜单 -->
       <!--
@@ -25,6 +31,7 @@
         :default-active="activeMenu"
         :default-openeds="['trade', 'errand', 'career']"
         router
+        @select="mobileOpen = false"
         class="side-menu"
         background-color="transparent"
         text-color="#5a6070"
@@ -129,6 +136,8 @@
     <el-container class="right-container">
       <el-header class="header">
         <div class="header-left">
+          <!-- 汉堡按钮：只在移动端出现，点开侧边抽屉 -->
+          <el-icon class="burger" :size="22" @click="mobileOpen = true"><Menu /></el-icon>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/goods' }">首页</el-breadcrumb-item>
             <el-breadcrumb-item v-if="currentBreadcrumb">{{ currentBreadcrumb }}</el-breadcrumb-item>
@@ -167,20 +176,26 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { getConversations } from '@/api/message'
 import SmartSupport from '@/components/SmartSupport.vue'
 import {
-  School, Goods, Briefcase, User, SwitchButton, Setting, Van, ChatDotRound, Monitor
+  School, Goods, Briefcase, User, SwitchButton, Setting, Van, ChatDotRound,
+  Monitor, Menu, Close
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const showUserMenu = ref(false)
+
+// 移动端侧边抽屉的开关。桌面端这条状态无意义——抽屉样式只在 <=767px 生效
+const mobileOpen = ref(false)
+// 路由一变就收起抽屉：手机上点完菜单项，必须让内容区露出来
+watch(() => route.path, () => { mobileOpen.value = false })
 
 // 顶栏未读徽标：30s 轮询会话列表（轻量聚合接口）
 const unreadTotal = ref(0)
@@ -521,5 +536,64 @@ function goToSettings() {
   padding: 0;
   overflow-y: auto;
   flex: 1;
+}
+
+/* ===== 移动端适配（<=767px）===== */
+/* 桌面端这几个元素不存在，先声明成 none，避免污染桌面样式 */
+.burger { display: none; }
+.aside-close { display: none; }
+.aside-mask { display: none; }
+
+@media (max-width: 767px) {
+  .header { padding: 0 12px; }
+  /* 顶栏右侧的欢迎语在手机上是纯占位，去掉给消息入口留空间 */
+  .welcome-text { display: none; }
+  .burger {
+    display: block;
+    margin-right: 10px;
+    color: #1d2129;
+    cursor: pointer;
+  }
+
+  /* 侧边栏从「占位的列」变成「滑出的抽屉」。
+     菜单结构一行没改，只是换了定位方式 —— 这是复用而非复制。 */
+  .aside {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 2001;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    background: #fff;
+  }
+  .aside.open {
+    transform: translateX(0);
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+  }
+  .aside-close {
+    display: block;
+    position: absolute;
+    top: 16px;
+    right: 12px;
+    color: #86909c;
+    z-index: 1;
+  }
+
+  /* 抽屉背后的半透明遮罩：点击即关闭 */
+  .aside-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 2000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  .aside-mask.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 </style>
