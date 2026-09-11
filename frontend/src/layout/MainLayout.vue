@@ -13,6 +13,14 @@
       </div>
 
       <!-- 导航菜单 -->
+      <!--
+        这里刻意【不加】 v-if="auth.isAuthenticated"：
+        路由守卫（router/index.js 的 beforeEach）已经对所有 meta.requiresAuth 的页面
+        做了拦截，未登录访问会自动跳登录页并带上 ?redirect= 记住原目的地。
+        菜单再隐藏一次既没有额外的安全收益，代价却是：未登录访客展开
+        「校园跑腿」「AI求职」看到的是空菜单，会以为功能缺失甚至页面坏了。
+        让入口始终可见、点了再引导去登录，才是正常的做法。
+      -->
       <el-menu
         :default-active="activeMenu"
         :default-openeds="['trade', 'errand', 'career']"
@@ -31,19 +39,19 @@
             <span class="menu-dot"></span>
             <span>商品集市</span>
           </el-menu-item>
-          <el-menu-item v-if="auth.isAuthenticated" index="/goods-publish">
+          <el-menu-item index="/goods-publish">
             <span class="menu-dot"></span>
             <span>发布商品</span>
           </el-menu-item>
-          <el-menu-item v-if="auth.isAuthenticated" index="/my-goods">
+          <el-menu-item index="/my-goods">
             <span class="menu-dot"></span>
             <span>我的商品</span>
           </el-menu-item>
-          <el-menu-item v-if="auth.isAuthenticated" index="/my-orders">
+          <el-menu-item index="/my-orders">
             <span class="menu-dot"></span>
             <span>我的订单</span>
           </el-menu-item>
-          <el-menu-item v-if="auth.isAuthenticated" index="/favorites">
+          <el-menu-item index="/favorites">
             <span class="menu-dot"></span>
             <span>我的收藏</span>
           </el-menu-item>
@@ -54,11 +62,11 @@
             <el-icon class="menu-icon"><Van /></el-icon>
             <span>校园跑腿</span>
           </template>
-          <el-menu-item v-if="auth.isAuthenticated" index="/errands">
+          <el-menu-item index="/errands">
             <span class="menu-dot"></span>
             <span>跑腿大厅</span>
           </el-menu-item>
-          <el-menu-item v-if="auth.isAuthenticated" index="/errands/publish">
+          <el-menu-item index="/errands/publish">
             <span class="menu-dot"></span>
             <span>发布跑腿需求</span>
           </el-menu-item>
@@ -69,11 +77,11 @@
             <el-icon class="menu-icon"><Briefcase /></el-icon>
             <span>AI求职</span>
           </template>
-          <el-menu-item v-if="auth.isAuthenticated" index="/resume">
+          <el-menu-item index="/resume">
             <span class="menu-dot"></span>
             <span>我的简历</span>
           </el-menu-item>
-          <el-menu-item v-if="auth.isAuthenticated" index="/interviews">
+          <el-menu-item index="/interviews">
             <span class="menu-dot"></span>
             <span>AI 模拟面试</span>
           </el-menu-item>
