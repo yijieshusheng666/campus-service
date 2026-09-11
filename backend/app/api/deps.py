@@ -49,3 +49,19 @@ async def get_optional_user(
     except (jwt.PyJWTError, ValueError, TypeError):
         return None
     return await db.get(User, user_id)
+
+
+async def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    """管理员依赖：在已认证的基础上再校验 is_admin。
+
+    刻意包在 get_current_user 之上，而不是把 is_admin 判断塞进 get_current_user：
+    这样「未登录」返回 401、「已登录但不是管理员」返回 403，两者语义分开，
+    前端可以据此区分「跳去登录」和「提示无权限」——混成一个 401 就分不清了。
+
+    所有 /api/v1/admin/* 接口统一依赖它，不需要在每个函数体里重复判 is_admin。
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限"
+        )
+    return current_user

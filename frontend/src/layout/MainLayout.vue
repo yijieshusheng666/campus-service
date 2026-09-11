@@ -86,6 +86,16 @@
             <span>AI 模拟面试</span>
           </el-menu-item>
         </el-sub-menu>
+
+        <!-- 管理后台入口：只有 is_admin 账号才渲染。
+             这里用 v-if 是合理的用法——它跟上面那些子菜单不同，
+             不是「把普通用户也能用的功能藏起来」，而是「运维入口本来就不该
+             给普通用户看到」。且后端 /api/v1/admin/* 全部依赖 get_current_admin，
+             前端藏不藏都不影响真实权限。 -->
+        <el-menu-item v-if="auth.user?.is_admin" index="/admin" class="admin-entry">
+          <el-icon class="menu-icon"><Monitor /></el-icon>
+          <span>管理后台</span>
+        </el-menu-item>
       </el-menu>
 
       <!-- 底部用户信息 -->
@@ -164,7 +174,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getConversations } from '@/api/message'
 import SmartSupport from '@/components/SmartSupport.vue'
 import {
-  School, Goods, Briefcase, User, SwitchButton, Setting, Van, ChatDotRound
+  School, Goods, Briefcase, User, SwitchButton, Setting, Van, ChatDotRound, Monitor
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

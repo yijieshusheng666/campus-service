@@ -101,6 +101,12 @@ const routes = [
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'admin',
+        name: 'AdminCenter',
+        component: () => import('@/views/admin/AdminCenter.vue'),
+        meta: { requiresAuth: true, requiresAdmin: true }
       }
     ]
   },
@@ -125,6 +131,13 @@ router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'Login', query: { redirect: to.fullPath } }
+  }
+  // 管理员页面：已登录但不是管理员，退回商品集市。
+  // 这只是体验层的拦截（避免普通用户撞进一个全是 403 的页面）——
+  // 真正的权限边界在后端 get_current_admin，它会对非管理员返回 403；
+  // 就算有人改前端把守卫绕过去，也拿不到任何数据。
+  if (to.meta.requiresAdmin && !auth.user?.is_admin) {
+    return { path: '/goods' }
   }
 })
 

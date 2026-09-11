@@ -20,6 +20,10 @@ class User(Base):
     avatar: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(default=True)
+    # 平台管理员：可访问 /api/v1/admin/* 下的全部接口。
+    # 刻意不做成 role 枚举或独立角色表——这个平台只需要「普通用户 / 管理员」两档，
+    # 多一层抽象等于为不存在的需求付复杂度。真出现第三种角色时再抽也不迟。
+    is_admin: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
