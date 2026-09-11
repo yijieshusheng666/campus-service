@@ -46,7 +46,7 @@ async function submit() {
   loading.value = true
   try {
     const res = await register(form)
-    auth.setAuth(res.data.access_token, res.data.user)
+    auth.setAuth(res.data.access_token, res.data.user, res.data.refresh_token)
     ElMessage.success('注册成功')
     router.push('/goods')
   } finally {

@@ -29,6 +29,10 @@ async def get_current_user(
         payload = decode_token(credentials.credentials)
     except jwt.PyJWTError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效或过期的令牌") from e
+    if payload.get("type") == "refresh":
+        # refresh token 只允许出现在 /auth/refresh，拿它访问业务接口一律拒绝——
+        # 它的生命周期长得多，若能当 access 用，「短命 access」就白设计了
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效或过期的令牌")
     user_id = int(payload.get("sub"))
     user = await db.get(User, user_id)
     if not user or not user.is_active:
@@ -45,6 +49,8 @@ async def get_optional_user(
         return None
     try:
         payload = decode_token(credentials.credentials)
+        if payload.get("type") == "refresh":
+            return None
         user_id = int(payload.get("sub"))
     except (jwt.PyJWTError, ValueError, TypeError):
         return None

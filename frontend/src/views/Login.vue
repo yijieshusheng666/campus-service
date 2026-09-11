@@ -44,7 +44,7 @@ async function submit() {
   loading.value = true
   try {
     const res = await login(form)
-    auth.setAuth(res.data.access_token, res.data.user)
+    auth.setAuth(res.data.access_token, res.data.user, res.data.refresh_token)
     ElMessage.success('登录成功')
     router.push(route.query.redirect || '/goods')
   } finally {

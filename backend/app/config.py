@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     # --- JWT ---
     SECRET_KEY: str = "CHANGE_ME_campus_platform_secret"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+    # 双令牌体系：access 短命（泄漏损失窗口小），refresh 长命但入库可吊销。
+    # ⚠️ 服务器 .env 里若仍写着旧值 10080 会覆盖这里，部署时需同步改 .env。
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # --- 上传存储 ---
     UPLOAD_DIR: str = str(BASE_DIR / "uploads")

@@ -10,7 +10,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,7 @@ from app.core.utils import escape_like
 from app.database import get_db
 from app.models.errand import Errand, ErrandStatus
 from app.models.goods import Goods, GoodsStatus
+from app.models.user import RefreshToken
 from app.models.interview import MockInterview
 from app.models.message import Message
 from app.models.order import Order, OrderStatus
@@ -114,6 +115,12 @@ async def set_user_active(
         raise HTTPException(status_code=400, detail="不能封禁管理员账号")
 
     user.is_active = payload.is_active
+    if not payload.is_active:
+        # 封禁同时吊销该用户全部 refresh token：refresh 交换时会再查 is_active，
+        # 这里吊销是双保险，且让「解封前所有端保持登出」语义明确
+        await db.execute(
+            update(RefreshToken).where(RefreshToken.user_id == user.id).values(revoked=True)
+        )
     await db.commit()
     await db.refresh(user)
     logger.info("管理员 %s 将用户 %s 设为 is_active=%s", admin.id, user.id, payload.is_active)
