@@ -199,30 +199,6 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
-
-      <!-- ================= 私信 ================= -->
-      <el-tab-pane label="站内私信" name="messages">
-        <div class="toolbar">
-          <el-button @click="loadMessages">刷新</el-button>
-          <span class="toolbar-hint">共 {{ messages.length }} 条（只读，仅用于风控排查）</span>
-        </div>
-        <el-table :data="messages" v-loading="loading.messages" stripe>
-          <el-table-column prop="id" label="ID" width="70" />
-          <el-table-column prop="sender_id" label="发送者 ID" width="100" />
-          <el-table-column prop="receiver_id" label="接收者 ID" width="100" />
-          <el-table-column prop="content" label="内容" min-width="260" show-overflow-tooltip />
-          <el-table-column label="已读" width="80">
-            <template #default="{ row }">
-              <el-tag :type="row.is_read ? 'success' : 'info'" size="small">
-                {{ row.is_read ? '是' : '否' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="时间" width="170">
-            <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -237,7 +213,6 @@ import {
   getStats,
   listErrands,
   listGoods,
-  listMessages,
   listOrders,
   listUsers,
   setGoodsStatus,
@@ -254,9 +229,8 @@ const users = ref([])
 const goods = ref([])
 const orders = ref([])
 const errands = ref([])
-const messages = ref([])
 
-const loading = reactive({ stats: false, users: false, goods: false, orders: false, errands: false, messages: false })
+const loading = reactive({ stats: false, users: false, goods: false, orders: false, errands: false })
 
 const userKeyword = ref('')
 const goodsStatus = ref('')
@@ -311,16 +285,14 @@ const loadGoods = () => guard(async () => {
 }, 'goods')
 const loadOrders = () => guard(async () => { orders.value = (await listOrders()).data }, 'orders')
 const loadErrands = () => guard(async () => { errands.value = (await listErrands()).data }, 'errands')
-const loadMessages = () => guard(async () => { messages.value = (await listMessages()).data }, 'messages')
 
-// 每个页签首次点开才加载，避免一进页面就打 6 个请求
+// 每个页签首次点开才加载，避免一进页面就打 5 个请求
 const loaders = {
   stats: loadStats,
   users: loadUsers,
   goods: loadGoods,
   orders: loadOrders,
-  errands: loadErrands,
-  messages: loadMessages
+  errands: loadErrands
 }
 const loaded = new Set()
 function onTabChange(name) {

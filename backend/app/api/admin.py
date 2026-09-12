@@ -33,7 +33,6 @@ from app.schemas.admin import (
 )
 from app.schemas.errand import ErrandOut
 from app.schemas.goods import GoodsOut
-from app.schemas.message import MessageOut
 from app.schemas.order import OrderOut
 
 logger = logging.getLogger(__name__)
@@ -245,16 +244,8 @@ async def delete_errand(
     return {"message": "跑腿需求已删除"}
 
 
-# ---------------- 站内私信 ----------------
-
-
-@router.get("/messages", response_model=list[MessageOut], summary="站内私信记录")
-async def list_messages(
-    limit: int = Query(default=200, ge=1, le=MAX_LIMIT),
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
-):
-    """只读。私信是双方对话，管理员删除单条会破坏会话完整性，
-    需要处置时用「封禁用户」而不是「删消息」。"""
-    stmt = select(Message).order_by(Message.id.desc()).limit(limit)
-    return list((await db.execute(stmt)).scalars().all())
+# 刻意不提供「站内私信」列表接口：
+# - 私信是一对一对话，删单条会破坏会话完整性（对方看到的话头凭空消失），
+#   所以「能看但不能管」本身没有意义；
+# - 内容属用户隐私，「能管数据」不等于「能逐条翻看聊天记录」；
+# - 用量层面看总览的「私信条数」已经够用，需要处置违规用户走「封禁账号」。

@@ -19,4 +19,6 @@ export const listOrders = (params) => request.get('/api/v1/admin/orders', { para
 export const listErrands = (params) => request.get('/api/v1/admin/errands', { params })
 export const deleteErrand = (id) => request.delete(`/api/v1/admin/errands/${id}`)
 
-export const listMessages = (params) => request.get('/api/v1/admin/messages', { params })
+// 说明：不做「站内私信」列表。私信是一对一对话，管理员逐条翻看既无处置手段
+// （删单条会破坏会话完整性），又直接触碰用户隐私；总览里的「私信条数」已足够
+// 用于判断用量。需要处置违规用户时走「封禁账号」。
