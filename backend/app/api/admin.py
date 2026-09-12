@@ -206,8 +206,17 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_admin),
 ):
-    # buyer / seller / goods 都是 lazy="joined"，不需要额外 options
-    stmt = select(Order).order_by(Order.id.desc()).limit(limit)
+    # ⚠️ 必须显式 selectinload(Goods.images)：OrderOut.goods.cover 走的是 Goods.cover
+    # 属性，而它读的是 images 这个**懒加载**关系。异步 SQLAlchemy 下访问未加载的
+    # 懒加载关系会抛 MissingGreenlet，前端表现为「订单页 500，其他页正常」。
+    # buyer / seller 确实是 lazy="joined" 不用管，但 goods 下面还有一层 images，
+    # 光靠 lazy="joined" 到不了那里 —— 这个坑踩过两次（另一次是 /admin/messages）。
+    stmt = (
+        select(Order)
+        .options(selectinload(Order.goods).selectinload(Goods.images))
+        .order_by(Order.id.desc())
+        .limit(limit)
+    )
     return list((await db.execute(stmt)).scalars().all())
 
 
