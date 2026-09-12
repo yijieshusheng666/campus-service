@@ -2,6 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import MainLayout from '@/layout/MainLayout.vue'
 
+// meta.hideSupportBall —— 隐藏右下角的智能客服悬浮球。
+// 约定：页面底部若有「sticky 操作栏」或「输入+发送区」，就一定要加这个标记，
+// 否则固定定位的悬浮球（56px，right/bottom 各 24px）会压住那里的按钮。
+// 聊天页的发送按钮、商品详情的「立即购买」都栽过这个坑。
 const routes = [
   {
     path: '/',
@@ -16,13 +20,15 @@ const routes = [
       {
         path: 'goods/:id',
         name: 'GoodsDetail',
-        component: () => import('@/views/goods/GoodsDetail.vue')
+        component: () => import('@/views/goods/GoodsDetail.vue'),
+        // 底部有 sticky 操作栏（立即购买 / 聊一聊），悬浮客服球会压在按钮上
+        meta: { hideSupportBall: true }
       },
       {
         path: 'goods-publish',
         name: 'GoodsPublish',
         component: () => import('@/views/goods/GoodsPublish.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, hideSupportBall: true }
       },
       {
         path: 'my-goods',
@@ -40,7 +46,7 @@ const routes = [
         path: 'order-confirm',
         name: 'OrderConfirm',
         component: () => import('@/views/goods/OrderConfirm.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, hideSupportBall: true }
       },
       {
         path: 'my-orders',
@@ -64,7 +70,8 @@ const routes = [
         path: 'interviews/:id',
         name: 'InterviewChat',
         component: () => import('@/views/interview/InterviewChat.vue'),
-        meta: { requiresAuth: true }
+        // 底部是答题输入区，悬浮球会压住发送按钮
+        meta: { requiresAuth: true, hideSupportBall: true }
       },
       {
         path: 'interviews/:id/report',
@@ -94,7 +101,8 @@ const routes = [
         path: 'chat/:userId?',
         name: 'Chat',
         component: () => import('@/views/chat/Chat.vue'),
-        meta: { requiresAuth: true }
+        // 发送按钮在右下角，与悬浮客服球位置正面冲突（会挡住发送）
+        meta: { requiresAuth: true, hideSupportBall: true }
       },
       {
         path: 'settings',

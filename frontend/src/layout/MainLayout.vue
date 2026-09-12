@@ -170,8 +170,9 @@
       </el-main>
     </el-container>
 
-    <!-- 全局智能客服 -->
-    <SmartSupport />
+    <!-- 全局智能客服。底部有操作栏/发送按钮的页面不加（见 router 的 hideSupportBall），
+         否则 56px 的固定悬浮球会压住「发送」「立即购买」这类按钮 -->
+    <SmartSupport v-if="!route.meta.hideSupportBall" />
   </el-container>
 </template>
 
