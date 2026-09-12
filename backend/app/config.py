@@ -61,11 +61,11 @@ class Settings(BaseSettings):
     # ⚠️ 换模型只改 backend/.env，不要改这里的默认值
     LLM_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     LLM_API_KEY: str = ""
-    LLM_MODEL: str = "glm-4-flash"
+    LLM_MODEL: str = "glm-4.5-flash"
     # 视觉模型（多模态商品识别用）：之前硬编码在 goods_agent.py 里，现改为可配置
     LLM_VISION_MODEL: str = "glm-4v-flash"
     LLM_TEMPERATURE: float = 0.2
-    LLM_MAX_TOKENS: int = 2048
+    LLM_MAX_TOKENS: int = 4096
     # 本地 Ollama 时使用（走 ChatOllama 分支）
     OLLAMA_HOST: str = "http://localhost:11434"
 

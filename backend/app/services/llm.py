@@ -135,7 +135,7 @@ dimension_ratings 固定 5 个维度：ATS兼容、招聘者扫描、Bullet质�
 """
 
 
-def _extract_text_chain(system_prompt: str):
+def _extract_text_chain(system_prompt: str, *, disable_thinking: bool = False):
     prompt = ChatPromptTemplate.from_messages(
         # system 用纯文本消息，避免 {JSON} 花括号被当作 f-string 模板解析而报错
         [SystemMessage(content=system_prompt), ("human", "{text}")]
@@ -145,6 +145,15 @@ def _extract_text_chain(system_prompt: str):
     from langchain_openai import ChatOpenAI
     if isinstance(llm, ChatOpenAI):
         llm = llm.bind(response_format={"type": "json_object"})
+        # GLM-4.5 系列默认带思考模式：结构化提取/诊断是确定性任务，思考过程纯属
+        # 额外输出 token，实测会显著拉长耗时（输出速率本身可达 24 tok/s，
+        # 关掉思考是免费模型下最大的单点提速）。仅对确定性链路禁用，
+        # 面试 Agent 等需要推理的链路保持默认。
+        if disable_thinking:
+            llm = llm.bind(
+                response_format={"type": "json_object"},
+                extra_body={"thinking": {"type": "disabled"}},
+            )
     return prompt | llm | StrOutputParser()
 
 
@@ -228,7 +237,7 @@ def _repair_truncated_json(s: str) -> dict:
 
 def extract_resume(text: str) -> dict:
     """LLM 结构化提取简历：返回含 name/phone/email/location/job_title/sections 的 dict。"""
-    chain = _extract_text_chain(RESUME_EXTRACT_SYSTEM)
+    chain = _extract_text_chain(RESUME_EXTRACT_SYSTEM, disable_thinking=True)
     try:
         logger.info("调用 LLM 提取简历，文本长度: %d", len(text))
         raw = chain.invoke({"text": text[:20000]}) or ""
@@ -250,7 +259,7 @@ def extract_resume(text: str) -> dict:
 
 def advise_resume(resume_text: str, job_requirement: str | None = None) -> dict:
     """AI 诊断简历：返回 {"overall_score", "summary", "items":[...]}，失败返回空 dict。"""
-    chain = _extract_text_chain(RESUME_ADVICE_SYSTEM)
+    chain = _extract_text_chain(RESUME_ADVICE_SYSTEM, disable_thinking=True)
     text = resume_text
     if job_requirement and job_requirement.strip():
         text = f"【岗位要求】\n{job_requirement.strip()}\n\n【简历原文】\n{resume_text}"
