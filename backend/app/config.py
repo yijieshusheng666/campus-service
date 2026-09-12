@@ -35,6 +35,23 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # --- 邮箱验证码 / SMTP ---
+    # REQUIRE_EMAIL_VERIFY=True 时，注册必须携带有效的邮箱验证码（见 api/auth.py）。
+    # 默认 False：SMTP 没配好之前不影响现有注册流程，配好后再在 .env 里翻开关。
+    REQUIRE_EMAIL_VERIFY: bool = False
+    EMAIL_CODE_TTL_MINUTES: int = 10      # 验证码有效期
+    EMAIL_CODE_COOLDOWN_SECONDS: int = 60  # 同一邮箱两次发送的最小间隔
+    EMAIL_CODE_HOURLY_LIMIT: int = 5       # 同一邮箱每小时最多发几次（防刷）
+    # SMTP：留空则「发送验证码」接口返回 503 并说明未配置，不会静默失败。
+    # QQ 邮箱示例：smtp.qq.com / 465 / SSL，SMTP_PASSWORD 填「授权码」而不是登录密码
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""       # 留空则用 SMTP_USER
+    SMTP_FROM_NAME: str = "校园综合服务平台"
+    SMTP_USE_SSL: bool = True  # 465→True(SSL)；587→False(STARTTLS)
+
     # --- 上传存储 ---
     UPLOAD_DIR: str = str(BASE_DIR / "uploads")
     STATIC_URL: str = "/static"

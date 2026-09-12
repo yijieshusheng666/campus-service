@@ -26,8 +26,18 @@ from app.core.security import (
 from app.database import get_db
 from app.models.resume import Resume
 from app.models.user import RefreshToken, User
-from app.schemas.auth import LoginIn, RefreshIn, RegisterIn, TokenOut, UserOut
+from app.schemas.auth import (
+    LoginIn,
+    RefreshIn,
+    RegisterIn,
+    RegisterPolicyOut,
+    SendEmailCodeIn,
+    TokenOut,
+    UserOut,
+)
 from app.schemas.user import UserProfileOut
+from app.services.email import EmailNotConfigured
+from app.services.email_code import CodeRateLimited, issue_code, verify_code
 
 import jwt
 
@@ -59,6 +69,14 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
     if existing.scalars().first():
         raise HTTPException(status_code=400, detail="邮箱或用户名已被占用")
 
+    # 邮箱归属校验：证明这个邮箱确实是他本人的，而不是随便填一个
+    if settings.REQUIRE_EMAIL_VERIFY:
+        if not payload.email_code:
+            raise HTTPException(status_code=400, detail="请填写邮箱验证码")
+        ok, reason = await verify_code(db, payload.email, payload.email_code)
+        if not ok:
+            raise HTTPException(status_code=400, detail=reason)
+
     user = User(
         username=payload.username,
         email=payload.email,
@@ -69,6 +87,45 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     return await _issue_token_pair(user, db)
+
+
+@router.get("/register-policy", response_model=RegisterPolicyOut)
+async def register_policy():
+    """注册策略（公开接口）：告诉前端是否需要邮箱验证码。"""
+    return RegisterPolicyOut(
+        require_email_verify=settings.REQUIRE_EMAIL_VERIFY,
+        email_configured=bool(settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD),
+    )
+
+
+@router.post("/email/send-code")
+async def send_email_code(payload: SendEmailCodeIn, db: AsyncSession = Depends(get_db)):
+    """发送邮箱验证码。
+
+    刻意**不告知该邮箱是否已注册**：那会变成一个人人可用的「邮箱是否注册过」查询接口
+    （用户枚举）。这里一律返回中性成功，注册时的占用提示才由 /register 给出。
+    """
+    try:
+        await issue_code(db, payload.email, payload.purpose)
+    except CodeRateLimited as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": str(e.retry_after)},
+        ) from e
+    except EmailNotConfigured as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="邮件服务尚未配置，请联系管理员",
+        ) from e
+    except Exception as e:
+        # SMTP 连不上、被拒收、超时等。原始异常已由 email_code 记进日志，
+        # 这里对用户只给一句通用提示，不把 SMTP 细节暴露出去
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="验证码发送失败，请稍后重试",
+        ) from e
+    return {"ok": True, "message": "验证码已发送，请查收邮件（含垃圾箱）"}
 
 
 @router.post("/login", response_model=TokenOut)
