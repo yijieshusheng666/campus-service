@@ -66,7 +66,16 @@ async def issue_code(db: AsyncSession, email: str, purpose: str = PURPOSE_REGIST
     ).scalar_one_or_none()
     if last is not None:
         elapsed = (now - last).total_seconds()
-        if elapsed < settings.EMAIL_CODE_COOLDOWN_SECONDS:
+        if elapsed < 0:
+            # 库里的时间落在「未来」——只可能来自两种原因：历史脏数据（早期该列由
+            # MySQL NOW() 按 UTC+8 写入，比 Python 的 UTC 快 8 小时）或机器时钟偏差。
+            # 此时绝不能当成「冷却中」：60 - (-25500) 会算出「请 25561 秒后再试」这种
+            # 约 7 小时的荒谬等待。这里选择放行 + 留日志，让问题可见而不是静默锁死用户。
+            logger.warning(
+                "email_verifications 存在未来时间行（疑似时区/时钟不一致）："
+                "email=%s, created_at=%s, utc_now=%s", email, last, now
+            )
+        elif elapsed < settings.EMAIL_CODE_COOLDOWN_SECONDS:
             wait = int(settings.EMAIL_CODE_COOLDOWN_SECONDS - elapsed)
             raise CodeRateLimited(f"请求过于频繁，请 {wait} 秒后再试", retry_after=wait)
 
