@@ -15,6 +15,8 @@
       <div class="foot">
         <span>还没有账号？</span>
         <router-link to="/register" class="link">立即注册</router-link>
+        <span class="divider">|</span>
+        <router-link to="/forgot-password" class="link">忘记密码？</router-link>
       </div>
     </el-card>
   </div>
@@ -67,4 +69,5 @@ async function submit() {
 .submit { width: 100%; }
 .foot { margin-top: 16px; text-align: center; font-size: 13px; color: #909399; }
 .link { color: #409eff; }
+.divider { margin: 0 8px; color: #dcdfe6; }
 </style>

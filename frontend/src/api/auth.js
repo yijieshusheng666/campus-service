@@ -7,3 +7,9 @@ export const me = () => request.get('/api/v1/auth/me')
 export const getRegisterPolicy = () => request.get('/api/v1/auth/register-policy')
 export const sendEmailCode = (email, purpose = 'register') =>
   request.post('/api/v1/auth/email/send-code', { email, purpose })
+
+// 找回密码：申请验证码 → 用验证码 + 新密码重置
+export const forgotPassword = (email) =>
+  request.post('/api/v1/auth/password/forgot', { email })
+export const resetPassword = (data) =>
+  request.post('/api/v1/auth/password/reset', data)

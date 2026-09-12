@@ -1,4 +1,4 @@
-"""认证 API：注册、登录、刷新令牌、登出、获取个人信息。
+"""认证 API：注册、登录、刷新令牌、登出、邮箱验证码、找回密码、获取个人信息。
 
 双令牌体系：
 - access  15 分钟，无状态，访问业务接口用
@@ -6,6 +6,10 @@
 - 登出/封禁 = 吊销 refresh（表里 revoked=True）；access 等它自然过期（≤15 分钟）
 - 轮换：每次 refresh 都换发新的 refresh 并吊销旧的；
   「已吊销的 refresh 再次出现」= 重放攻击信号，吊销该用户全部 refresh
+
+邮箱验证码承载两个场景（purpose 隔离）：
+- register：注册时验证邮箱归属
+- reset：找回密码（重置成功后吊销该用户全部 refresh，强制全端重新登录）
 """
 from datetime import datetime, timedelta, timezone
 
@@ -27,21 +31,30 @@ from app.database import get_db
 from app.models.resume import Resume
 from app.models.user import RefreshToken, User
 from app.schemas.auth import (
+    ForgotPasswordIn,
     LoginIn,
     RefreshIn,
     RegisterIn,
     RegisterPolicyOut,
+    ResetPasswordIn,
     SendEmailCodeIn,
     TokenOut,
     UserOut,
 )
 from app.schemas.user import UserProfileOut
 from app.services.email import EmailNotConfigured
-from app.services.email_code import CodeRateLimited, issue_code, verify_code
+from app.services.email_code import (
+    PURPOSE_RESET,
+    CodeRateLimited,
+    issue_code,
+    verify_code,
+)
 
-import jwt
+import logging
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+logger = logging.getLogger(__name__)
 
 
 async def _issue_token_pair(user: User, db: AsyncSession) -> TokenOut:
@@ -100,13 +113,24 @@ async def register_policy():
 
 @router.post("/email/send-code")
 async def send_email_code(payload: SendEmailCodeIn, db: AsyncSession = Depends(get_db)):
-    """发送邮箱验证码。
+    """发送邮箱验证码（注册用）。
 
     刻意**不告知该邮箱是否已注册**：那会变成一个人人可用的「邮箱是否注册过」查询接口
     （用户枚举）。这里一律返回中性成功，注册时的占用提示才由 /register 给出。
     """
+    await _send_code(db, payload.email, payload.purpose)
+    return {"ok": True, "message": "验证码已发送，请查收邮件（含垃圾箱）"}
+
+
+# ---------------- 找回密码 ----------------
+# 复用同一张 email_verifications 表与同一套发码/校验/限流，只是 purpose 换成 reset。
+# 刻意不复用 register 用途：两种场景的码必须隔离，否则「注册验证码」能改别人密码。
+
+
+async def _send_code(db: AsyncSession, email: str, purpose: str) -> None:
+    """调 issue_code 并把领域异常翻译成 HTTP 状态码（send-code 与 forgot 共用）。"""
     try:
-        await issue_code(db, payload.email, payload.purpose)
+        await issue_code(db, email, purpose)
     except CodeRateLimited as e:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -125,7 +149,55 @@ async def send_email_code(payload: SendEmailCodeIn, db: AsyncSession = Depends(g
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="验证码发送失败，请稍后重试",
         ) from e
-    return {"ok": True, "message": "验证码已发送，请查收邮件（含垃圾箱）"}
+
+
+@router.post("/password/forgot", response_model=dict)
+async def forgot_password(payload: ForgotPasswordIn, db: AsyncSession = Depends(get_db)):
+    """请求「重置密码」验证码。
+
+    防用户枚举：无论该邮箱是否注册过，对外都是同一句话。
+    只在用户确实存在时才真的发信 —— 否则这个接口会变成「给任意邮箱发信」的工具。
+    （响应耗时的细微差异理论上可被用来判断邮箱是否存在，但已有 60 秒冷却 +
+    每小时上限，批量探测的成本远高于收益，这个场景下可以接受。）
+    """
+    user = (
+        await db.execute(select(User).where(User.email == payload.email))
+    ).scalar_one_or_none()
+    if user is not None:
+        await _send_code(db, payload.email, PURPOSE_RESET)
+    return {"ok": True, "message": "如果该邮箱已注册，验证码已发送（含垃圾箱）"}
+
+
+@router.post("/password/reset", response_model=dict)
+async def reset_password(payload: ResetPasswordIn, db: AsyncSession = Depends(get_db)):
+    """用邮箱验证码重置密码，并吊销该用户全部 refresh token。
+
+    为什么要连带吊销：触发「重置密码」的典型场景就是「账号可能已被他人控制」。
+    如果旧设备上的登录态继续有效，改密码等于没改 —— 攻击者手里的 refresh token
+    照样能续命。所以重置成功即全端下线，必须用新密码重新登录。
+
+    附带效果（有意保留）：重置后若旧设备拿已吊销的 refresh 来续期，会命中
+    /refresh 的重放检测，进而连带吊销该用户当时的所有会话 —— 用户表现为
+    「需要重新登录一次」，与重置密码的预期一致，因此不做特例绕开。
+    """
+    user = (
+        await db.execute(select(User).where(User.email == payload.email))
+    ).scalar_one_or_none()
+    # 邮箱不存在时也返回「验证码不正确」，不透露该邮箱是否注册
+    if user is None:
+        raise HTTPException(status_code=400, detail="验证码不正确或已过期")
+
+    ok, reason = await verify_code(db, payload.email, payload.code, PURPOSE_RESET)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+
+    user.hashed_password = hash_password(payload.new_password)
+    await db.execute(
+        update(RefreshToken).where(RefreshToken.user_id == user.id).values(revoked=True)
+    )
+    await db.commit()
+    logger.info("用户 %s 通过邮箱验证码重置了密码，已吊销其全部 refresh token", user.id)
+    return {"ok": True, "message": "密码已重置，请用新密码登录"}
 
 
 @router.post("/login", response_model=TokenOut)

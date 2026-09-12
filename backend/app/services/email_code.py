@@ -23,6 +23,7 @@ from app.services.email import EmailNotConfigured, build_code_email, send_email
 logger = logging.getLogger(__name__)
 
 PURPOSE_REGISTER = "register"
+PURPOSE_RESET = "reset"
 MAX_ATTEMPTS = 5
 
 

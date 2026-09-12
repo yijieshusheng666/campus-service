@@ -15,7 +15,19 @@ class RegisterIn(BaseModel):
 
 class SendEmailCodeIn(BaseModel):
     email: EmailStr
-    purpose: str = Field(default="register", pattern="^(register)$")
+    # register=注册验证；reset=找回密码。两种用途的码在库里按 purpose 隔离，
+    # 注册的码不能拿去重置密码（否则拿到注册码就能改别人密码）
+    purpose: str = Field(default="register", pattern="^(register|reset)$")
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=10)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class LoginIn(BaseModel):
