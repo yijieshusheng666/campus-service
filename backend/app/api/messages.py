@@ -2,9 +2,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
 from app.database import get_db
+from app.models.goods import Goods
 from app.models.message import Message
 from app.models.user import User
 from app.schemas.message import ConversationOut, MessageOut
@@ -79,6 +81,10 @@ async def list_messages(
         )
         .order_by(Message.id.desc())
         .limit(min(max(limit, 1), 100))
+        # 商品卡片消息要渲染缩略图：必须预加载 goods 及其 images，
+        # 否则 MessageOut 序列化时访问 Goods.cover 会触发懒加载 ——
+        # 异步 SQLAlchemy 下懒加载直接抛 MissingGreenlet，且报错信息完全指不到这里
+        .options(selectinload(Message.goods).selectinload(Goods.images))
     )
     if before_id is not None:
         stmt = stmt.where(Message.id < before_id)

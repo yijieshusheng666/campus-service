@@ -36,6 +36,15 @@ class Goods(Base):
         back_populates="goods", cascade="all, delete-orphan", order_by="GoodsImage.sort"
     )
 
+    @property
+    def cover(self) -> str | None:
+        """首图 URL，供私信商品卡片等「只需要一张缩略图」的场景使用。
+
+        注意：images 是懒加载关系，async 上下文里若未 eager load 就访问会抛
+        MissingGreenlet —— 调用方需 joinedload/selectinload 预加载（见 api/messages.py）。
+        """
+        return self.images[0].url if self.images else None
+
 
 class GoodsImage(Base):
     __tablename__ = "goods_images"

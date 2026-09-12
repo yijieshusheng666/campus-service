@@ -3,7 +3,7 @@
     <!-- 顶部返回栏 -->
     <div class="top-nav">
       <el-icon class="back-btn" @click="$router.back()"><ArrowLeft /></el-icon>
-      <span class="nav-title">宝贝详情</span>
+      <span class="nav-title">商品详情</span>
       <span></span>
     </div>
 
@@ -58,7 +58,7 @@
 
       <!-- 商品描述 -->
       <div class="desc-section">
-        <h4 class="section-title">宝贝描述</h4>
+        <h4 class="section-title">商品描述</h4>
         <p class="desc-text" style="white-space: pre-wrap">{{ goods.description }}</p>
       </div>
 
@@ -188,7 +188,12 @@ function handleChat() {
     router.push('/login')
     return
   }
-  router.push({ name: 'Chat', params: { userId: goods.value.seller_id } })
+  // 带上 goodsId：进入聊天页后自动把这件商品作为卡片消息发出去
+  router.push({
+    name: 'Chat',
+    params: { userId: goods.value.seller_id },
+    query: { goodsId: goods.value.id }
+  })
 }
 
 async function onDelete() {

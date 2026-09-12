@@ -5,12 +5,16 @@
 """
 import jwt
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.security import decode_token
 from app.database import get_db
+from app.models.goods import Goods
 from app.models.message import Message
 from app.models.user import User
+from app.schemas.message import GoodsBriefOut
 
 router = APIRouter()
 
@@ -80,6 +84,7 @@ async def ws_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
 
             receiver_id = data.get("receiver_id")
             content = str(data.get("content") or "").strip()
+            goods_id = data.get("goods_id")
             if not isinstance(receiver_id, int) or not content:
                 await ws.send_json({"type": "error", "detail": "参数不合法"})
                 continue
@@ -93,8 +98,33 @@ async def ws_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
                 await ws.send_json({"type": "error", "detail": "接收者不存在"})
                 continue
 
+            # ---- 商品卡片：可选附带一件商品 ----
+            # 在服务端校验存在性而不是信任前端传的 id：伪造的 goods_id 会让
+            # 接收方渲染出一张指向不存在商品的卡片（点击即 404）
+            goods_brief = None
+            if goods_id is not None:
+                if not isinstance(goods_id, int):
+                    await ws.send_json({"type": "error", "detail": "商品参数不合法"})
+                    continue
+                goods = (
+                    await db.execute(
+                        select(Goods)
+                        .where(Goods.id == goods_id)
+                        .options(selectinload(Goods.images))
+                    )
+                ).scalar_one_or_none()
+                if goods is None:
+                    await ws.send_json({"type": "error", "detail": "商品不存在或已删除"})
+                    continue
+                goods_brief = GoodsBriefOut.model_validate(goods).model_dump(mode="json")
+
             # ---- 落库优先 ----
-            message = Message(sender_id=user_id, receiver_id=receiver_id, content=content)
+            message = Message(
+                sender_id=user_id,
+                receiver_id=receiver_id,
+                content=content,
+                goods_id=goods_id,
+            )
             db.add(message)
             await db.commit()
             await db.refresh(message)
@@ -107,6 +137,8 @@ async def ws_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
                     "message_id": message.id,
                     "receiver_id": receiver_id,
                     "content": content,
+                    "goods_id": goods_id,
+                    "goods": goods_brief,
                     "created_at": message.created_at.isoformat(),
                 },
             )
@@ -118,6 +150,8 @@ async def ws_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
                     "id": message.id,
                     "sender_id": user_id,
                     "content": content,
+                    "goods_id": goods_id,
+                    "goods": goods_brief,
                     "created_at": message.created_at.isoformat(),
                 },
             )

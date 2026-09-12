@@ -5,7 +5,7 @@
       <div class="search-wrap">
         <el-input
           v-model="query.keyword"
-          placeholder="搜索你想要的宝贝"
+          placeholder="搜索你想要的商品"
           clearable
           class="search-input"
           @keyup.enter="search"
@@ -87,7 +87,7 @@
       </div>
     </div>
 
-    <el-empty v-if="!loading && !list.length" description="暂无相关宝贝" :image-size="120" />
+    <el-empty v-if="!loading && !list.length" description="暂无相关商品" :image-size="120" />
 
     <div v-if="total > query.page_size" class="load-more">
       <el-button v-if="query.page * query.page_size < total" @click="loadMore" :loading="loading">加载更多</el-button>

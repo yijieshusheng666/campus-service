@@ -45,7 +45,7 @@
       </div>
     </div>
 
-    <el-empty v-if="!loading && !list.length" description="还没有收藏宝贝" :image-size="100" />
+    <el-empty v-if="!loading && !list.length" description="还没有收藏商品" :image-size="100" />
   </div>
 </template>
 

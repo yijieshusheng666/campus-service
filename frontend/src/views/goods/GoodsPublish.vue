@@ -3,7 +3,7 @@
     <!-- 顶部导航 -->
     <div class="top-nav">
       <el-icon class="back-btn" @click="$router.back()"><ArrowLeft /></el-icon>
-      <span class="nav-title">{{ isEdit ? '编辑宝贝' : '发布宝贝' }}</span>
+      <span class="nav-title">{{ isEdit ? '编辑商品' : '发布商品' }}</span>
       <span></span>
     </div>
 
@@ -11,7 +11,7 @@
       <!-- 图片上传 -->
       <div class="form-section">
         <div class="section-label">
-          <span class="required">*</span> 宝贝图片（最多6张）
+          <span class="required">*</span> 商品图片（最多6张）
         </div>
         <div class="upload-grid">
           <div
@@ -97,7 +97,7 @@
             v-model="form.title"
             maxlength="30"
             show-word-limit
-            placeholder="宝贝标题（30字以内）"
+            placeholder="商品标题（30字以内）"
             class="simple-input"
           />
         </el-form-item>
@@ -105,14 +105,14 @@
 
       <!-- 描述 -->
       <div class="form-section">
-        <el-form-item label="宝贝描述" prop="description" class="form-item">
+        <el-form-item label="商品描述" prop="description" class="form-item">
           <el-input
             v-model="form.description"
             type="textarea"
             :rows="5"
             maxlength="500"
             show-word-limit
-            placeholder="描述宝贝情况、入手渠道、转手原因等"
+            placeholder="描述商品情况、入手渠道、转手原因等"
             class="simple-textarea"
           />
         </el-form-item>

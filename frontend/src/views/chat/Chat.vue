@@ -1,6 +1,6 @@
 <template>
-  <div class="chat-page">
-    <!-- 左侧：会话列表 -->
+  <div class="chat-page" :class="{ 'has-peer': !!peerId }">
+    <!-- 左侧：会话列表（移动端与聊天区互斥显示） -->
     <div class="conv-panel">
       <div class="conv-header">
         <span>我的私信</span>
@@ -35,7 +35,11 @@
     <div class="chat-panel">
       <template v-if="peerId">
         <div class="chat-header">
-          <span class="chat-peer">{{ peerName || `用户 ${peerId}` }}</span>
+          <div class="chat-header-left">
+            <!-- 移动端返回按钮：桌面端隐藏（列表一直可见，不需要返回） -->
+            <el-icon class="chat-back" @click="backToList"><ArrowLeft /></el-icon>
+            <span class="chat-peer">{{ peerName || `用户 ${peerId}` }}</span>
+          </div>
           <span class="ws-dot" :class="wsState" :title="wsTitle"></span>
         </div>
 
@@ -49,6 +53,26 @@
           >
             <div class="msg-avatar">{{ avatarChar(m.sender_name) }}</div>
             <div class="msg-body">
+              <!-- 商品卡片：从商品详情「聊一聊」带过来的那件商品 -->
+              <div
+                v-if="m.goods"
+                class="msg-goods"
+                @click="openGoods(m.goods_id)"
+              >
+                <img v-if="m.goods.cover" :src="m.goods.cover" class="msg-goods-img" alt="" />
+                <div v-else class="msg-goods-img msg-goods-img--empty">
+                  <el-icon><Picture /></el-icon>
+                </div>
+                <div class="msg-goods-main">
+                  <div class="msg-goods-title">{{ m.goods.title }}</div>
+                  <div class="msg-goods-price">
+                    ¥{{ formatPrice(m.goods.price) }}
+                    <span v-if="m.goods.status !== 'on_sale'" class="msg-goods-tag">
+                      {{ m.goods.status === 'sold' ? '已售出' : '已下架' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
               <div class="msg-bubble">{{ m.content }}</div>
               <div class="msg-time">{{ fullTime(m.created_at) }}</div>
             </div>
@@ -84,8 +108,9 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatDotRound } from '@element-plus/icons-vue'
+import { ArrowLeft, ChatDotRound, Picture } from '@element-plus/icons-vue'
 import { getConversations, getMessages, markRead } from '@/api/message'
+import { getGoods } from '@/api/goods'
 import { getUser } from '@/api/users'
 import { useAuthStore } from '@/stores/auth'
 
@@ -109,6 +134,11 @@ const wsTitle = computed(
   () => ({ connecting: '连接中', open: '实时在线', closed: '已断开' }[wsState.value])
 )
 
+// 待发送的商品卡片：从商品详情进来时带 goodsId，等 WebSocket 连上后再发
+const pendingGoodsId = ref(null)
+// 商品信息缓存：乐观气泡需要标题/价格/封面，历史消息由后端直接返回
+const goodsCache = new Map()
+
 let heartbeatTimer = null
 let reconnectDelay = 1000
 
@@ -123,6 +153,8 @@ function connect() {
   sock.onopen = () => {
     wsState.value = 'open'
     reconnectDelay = 1000
+    // 商品卡片可能因连接未就绪被挂起，连上后补发
+    flushPendingCard()
     // 心跳：30s 一次 ping 保活
     clearInterval(heartbeatTimer)
     heartbeatTimer = setInterval(() => {
@@ -141,6 +173,8 @@ function connect() {
         sender_name: auth.user?.nickname || auth.user?.username,
         receiver_id: data.receiver_id,
         content: data.content,
+        goods_id: data.goods_id ?? null,
+        goods: data.goods ?? null,
         created_at: data.created_at,
       }
       if (idx >= 0) messages.value.splice(idx, 1, confirmed)
@@ -156,6 +190,8 @@ function connect() {
           sender_name: peerName.value,
           receiver_id: myId.value,
           content: data.content,
+          goods_id: data.goods_id ?? null,
+          goods: data.goods ?? null,
           created_at: data.created_at,
         })
         markRead(peerId.value).catch(() => {})
@@ -264,11 +300,26 @@ function selectConversation(userId) {
   router.push({ name: 'Chat', params: { userId } })
 }
 
+// 移动端：返回会话列表（清空 userId，列表与聊天区由 CSS 按是否选中对方切换）
+function backToList() {
+  router.push({ name: 'Chat' })
+}
+
+function openGoods(goodsId) {
+  if (!goodsId) return
+  router.push({ name: 'GoodsDetail', params: { id: goodsId } })
+}
+
 // ---- 发送 ----
 function send() {
   const content = draft.value.trim()
-  if (!content || wsState.value !== 'open') return
+  if (!content) return
   draft.value = ''
+  sendMessage({ content })
+}
+
+function sendMessage({ content, goodsId = null, goods = null }) {
+  if (!content || wsState.value !== 'open') return
   // 乐观展示 pending 消息，chat_ack 到达后替换为落库结果
   messages.value.push({
     id: -Date.now(),
@@ -276,13 +327,45 @@ function send() {
     sender_name: auth.user?.nickname || auth.user?.username,
     receiver_id: peerId.value,
     content,
+    goods_id: goodsId,
+    goods,
     created_at: new Date().toISOString(),
     pending: true,
   })
   scrollToBottom()
-  ws.value.send(
-    JSON.stringify({ type: 'chat', receiver_id: peerId.value, content })
-  )
+  const payload = { type: 'chat', receiver_id: peerId.value, content }
+  if (goodsId) payload.goods_id = goodsId
+  ws.value.send(JSON.stringify(payload))
+}
+
+/** 从商品详情「聊一聊」进入时：把这件商品作为卡片消息发出去 */
+async function maybeSendGoodsCard() {
+  const gid = Number(route.query.goodsId)
+  if (!gid || !peerId.value) return
+  // 立刻清掉 query：否则刷新页面会重复发送同一张卡片
+  router.replace({ name: 'Chat', params: { userId: peerId.value } })
+  pendingGoodsId.value = gid
+  flushPendingCard()
+}
+
+async function flushPendingCard() {
+  if (!pendingGoodsId.value || wsState.value !== 'open' || !peerId.value) return
+  const gid = pendingGoodsId.value
+  pendingGoodsId.value = null
+  let goods = goodsCache.get(gid)
+  if (!goods) {
+    try {
+      goods = (await getGoods(gid)).data
+      goodsCache.set(gid, goods)
+    } catch (e) {
+      goods = null // 拉取失败仍发送：至少让对方收到一句咨询
+    }
+  }
+  sendMessage({
+    content: `你好，我想咨询一下「${goods?.title || '这件商品'}」`,
+    goodsId: gid,
+    goods,
+  })
 }
 
 // ---- 滚动 ----
@@ -300,6 +383,9 @@ function onScroll() {
 // ---- 工具 ----
 function avatarChar(name) {
   return (name || '?').charAt(0).toUpperCase()
+}
+function formatPrice(p) {
+  return Number(p ?? 0).toFixed(2)
 }
 function shortTime(t) {
   if (!t) return ''
@@ -332,6 +418,8 @@ onMounted(async () => {
   await refreshConversations()
   if (peerId.value) await openConversation(peerId.value)
   connect()
+  // 带 goodsId 进来 → 自动发商品卡片（等 WS 就绪，见 flushPendingCard）
+  maybeSendGoodsCard()
 })
 
 onUnmounted(() => {
@@ -470,16 +558,32 @@ onUnmounted(() => {
   border-bottom: 1px solid #eef0f4;
   flex-shrink: 0;
 }
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-back {
+  display: none; /* 仅移动端显示 */
+  font-size: 20px;
+  color: #4e5969;
+  cursor: pointer;
+}
 .chat-peer {
   font-size: 15px;
   font-weight: 600;
   color: #1d2129;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ws-dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: #d0d3d9;
+  flex-shrink: 0;
 }
 .ws-dot.open {
   background: #67c23a;
@@ -563,6 +667,64 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
+/* ===== 商品卡片 ===== */
+.msg-goods {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #eef0f4;
+  border-radius: 12px;
+  padding: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  max-width: 260px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.15s;
+}
+.msg-goods:hover {
+  border-color: #ffb066;
+}
+.msg-goods-img {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #f5f6f8;
+}
+.msg-goods-img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #c9ced6;
+}
+.msg-goods-main {
+  min-width: 0;
+  flex: 1;
+}
+.msg-goods-title {
+  font-size: 13px;
+  color: #1d2129;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.msg-goods-price {
+  font-size: 13px;
+  color: #ff6b00;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.msg-goods-tag {
+  font-size: 11px;
+  color: #86909c;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
 .chat-input {
   display: flex;
   gap: 10px;
@@ -589,5 +751,59 @@ onUnmounted(() => {
 .chat-placeholder p {
   font-size: 13px;
   color: #a0a5b2;
+}
+
+/* ===== 移动端：会话列表与聊天区互斥，变成「列表 → 聊天」两级页面 ===== */
+@media (max-width: 767px) {
+  .chat-page {
+    position: relative;
+    height: 100%;
+  }
+  .conv-panel {
+    width: 100%;
+    border-right: none;
+  }
+  /* 选中某个会话后：聊天区盖住列表（绝对定位而非 display:none，
+     这样返回列表时滚动位置仍保留） */
+  .chat-panel {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    z-index: 2;
+  }
+  .chat-page:not(.has-peer) .chat-panel {
+    display: none;
+  }
+  .chat-page.has-peer .conv-panel {
+    display: none;
+  }
+  .chat-back {
+    display: block;
+  }
+  .chat-header {
+    padding: 0 12px;
+  }
+  .msg-list {
+    padding: 12px;
+  }
+  .msg-body {
+    max-width: 76%;
+  }
+  .msg-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+  }
+  .msg-goods {
+    max-width: 200px;
+  }
+  .msg-goods-img {
+    width: 44px;
+    height: 44px;
+  }
+  .chat-input {
+    padding: 8px 12px;
+    gap: 8px;
+  }
 }
 </style>
