@@ -55,6 +55,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createInterviewSse, deleteInterview, myInterviews } from '@/api/interview'
 import { myResumes } from '@/api/resume'
+import { loadSpeakPref } from '@/utils/speech'
 
 const router = useRouter()
 const items = ref([])
@@ -92,7 +93,15 @@ const create = async () => {
         if (event === 'error') ElMessage.error(data.detail)
       }
     )
-    if (interviewId) router.push({ name: 'InterviewChat', params: { id: interviewId } })
+    if (interviewId) {
+      // 首题是在本页生成的。朗读放在聊天页做：本页即将卸载，在这里朗读会被打断；
+      // 用 autoplay 标记告诉聊天页「进去后把最后一道题读出来」。
+      router.push({
+        name: 'InterviewChat',
+        params: { id: interviewId },
+        query: loadSpeakPref() ? { autoplay: '1' } : {}
+      })
+    }
   } finally {
     creating.value = false
   }
