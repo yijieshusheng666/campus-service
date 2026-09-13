@@ -3,6 +3,7 @@
 httpx 的 ASGITransport 不触发 app lifespan，因此不会触碰真实 MySQL
 （import 阶段创建的 engine 是惰性连接，不产生实际连接）。
 """
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -52,6 +53,20 @@ async def setup_db():
     yield
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.fixture(autouse=True)
+def _disable_interview_prewarm(monkeypatch):
+    """禁用创建面试时的「面试前分析」后台预热。
+
+    它是后台副作用：会真实调用 LLM（数十字的简历分析，耗时且消耗免费额度）。
+    目前带简历的创建用例都走 404 分支，不会触发；这里显式禁用是为了防止
+    将来新增「带简历创建面试」的用例时静默触网。
+    """
+    async def _noop(resume_text: str) -> None:
+        return None
+
+    monkeypatch.setattr("app.api.interviews.prewarm_plan", _noop)
 
 
 @pytest_asyncio.fixture

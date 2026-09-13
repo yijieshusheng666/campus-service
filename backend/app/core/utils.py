@@ -51,6 +51,15 @@ def looks_like_docx(head: bytes) -> bool:
     return head.startswith(b"PK\x03\x04")
 
 
+def looks_like_wav(head: bytes) -> bool:
+    """WAV：RIFF 容器且第 8-12 字节为 WAVE 标识。
+
+    语音转写只接受 WAV（前端用 Web Audio 采集 PCM 后自行封 WAV 头，
+    绕开 MediaRecorder 默认的 webm/opus —— 那种格式上游 ASR 不保证支持）。
+    """
+    return head[:4] == b"RIFF" and head[8:12] == b"WAVE"
+
+
 # ---- 简历隐私脱敏 ----
 
 # 手机号：中国大陆 11 位（1 开头，第二位 3-9）

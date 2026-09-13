@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     # 本地 Ollama 时使用（走 ChatOllama 分支）
     OLLAMA_HOST: str = "http://localhost:11434"
 
+    # --- 语音识别：复用上面的 LLM_BASE_URL / LLM_API_KEY（同一账户，无需新密钥） ---
+    # 智谱 ASR 走 OpenAI 兼容的 /audio/transcriptions（multipart 上传）
+    ASR_MODEL: str = "glm-asr-2512"
+    # 单段音频上限：智谱硬限制是 25MB / 30 秒；这里再收紧，防止有人拿接口刷额度
+    ASR_MAX_BYTES: int = 10 * 1024 * 1024
+    ASR_TIMEOUT: int = 60
+
     @field_validator("UPLOAD_DIR")
     @classmethod
     def _abs_upload_dir(cls, v: str) -> str:

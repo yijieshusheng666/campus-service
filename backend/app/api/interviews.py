@@ -3,19 +3,21 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
-from app.core.utils import mask_pii
+from app.config import settings
+from app.core.utils import looks_like_wav, mask_pii
 from app.database import AsyncSessionLocal, get_db
 from app.models.interview import InterviewMessage, InterviewStatus, MockInterview
 from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.interview import InterviewChatIn, InterviewCreate, InterviewDetailOut, InterviewOut
+from app.services.asr import ASRError, extract_hotwords, transcribe
 from app.services.interview import generate_report, stream_question
 from app.services.interview_plan import prewarm_plan
 
@@ -245,6 +247,54 @@ async def chat_interview(
         _chat_sse(itv.id, resume_text, itv.job_position, history),
         media_type="text/event-stream",
     )
+
+
+# ---- 语音转写：把回答录音转成文本（前端分片提交） ----
+@router.post("/{interview_id}/transcribe")
+async def transcribe_interview_answer(
+    interview_id: int,
+    audio: UploadFile = File(...),
+    prompt: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """把一段面试回答的录音转写为文本。
+
+    切片由前端完成（智谱 ASR 单段上限 30 秒 / 25MB），后端不引入 ffmpeg / pydub
+    这类音频处理依赖。`prompt` 传上一段的转写结果，用于保持跨切片的语义连续。
+
+    返回 {"text": "..."}：前端把文本填进输入框后走现有 `/chat` 接口 ——
+    语音只是替换了「打字」这一环，Agent 链路完全复用。
+    """
+    itv = await _load_own_interview(db, interview_id, user)
+
+    content = await audio.read(settings.ASR_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="音频内容为空")
+    if len(content) > settings.ASR_MAX_BYTES:
+        limit_mb = settings.ASR_MAX_BYTES // (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"单段音频超过 {limit_mb}MB，请缩短录音")
+    if not looks_like_wav(content[:12]):
+        raise HTTPException(status_code=400, detail="仅支持 WAV 音频")
+
+    # 热词表来自该场面试关联的简历：把「WebSocket / 召回率 / 幂等」这类术语交给
+    # ASR 精确匹配，减少同音错字（简历文本已脱敏，不影响热词抽取）。
+    hotwords: list[str] = []
+    if itv.resume_id:
+        resume = await db.get(Resume, itv.resume_id)
+        if resume:
+            hotwords = extract_hotwords(_resume_to_text(resume))
+
+    try:
+        text = await transcribe(
+            content,
+            filename=audio.filename or "answer.wav",
+            prompt=prompt,
+            hotwords=hotwords,
+        )
+    except ASRError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"text": text}
 
 
 # ---- 结束面试：生成评估报告 ----
