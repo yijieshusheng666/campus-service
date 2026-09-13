@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.agents.interview_state import InterviewState
 from app.agents.interview_tools import build_interview_tools
+from app.services.interview_plan import format_plan_for_prompt, get_cached_plan
 from app.services.llm import _bind_tools, _build_llm, _msg_text
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,45 @@ AGENT_SYSTEM = """你是一位资深的技术面试官，正在对候选人进�
 
 【候选人简历（索引）】
 {resume_text}
-
+{plan_block}
 【面试规则】
 1. 每次只提出一个问题，基于简历内容与岗位要求，有针对性；问题之间绝不给评价或反馈
 2. 提问难度递进：自我介绍开场（中等）→ 项目/经历深挖（深入）→ 技术基础 → 场景/开放题
-3. 像真实面试官一样自适应追问：回答具体精彩 → 顺着细节深挖；回答含糊笼统 → 追问具体角色；
-   出现"我们"式表述 → 要求拆出个人贡献；发现自相矛盾或惊人表述 → 当场追问
+3. 像真实面试官一样自适应追问：回答具体精彩 → 顺着细节往下深挖；回答含糊笼统 → 追问具体角色；
+   出现"我们"式表述 → 要求拆出个人贡献；发现自相矛盾或惊人表述 → 当场追问，不要放过
 4. 口吻专业、友好；不要一次抛出多个问题；不要输出与提问无关的内容
 
+【提问槽位（每次提问落在以下九类之一，避免同一槽位连续重复）】
+- 事实槽：你具体做了什么（如"这个项目里你实际动手写的是哪部分？"）
+- 机制槽：为什么这么做、原理是什么
+- 取舍槽：还有别的方案吗、为什么没选它
+- 失败槽：出过什么问题、你是怎么定位到原因的
+- 数字槽：多久、多大、多少（追问基数与口径）
+- 协作槽：这件事谁决策的、分歧怎么对齐
+- 迁移槽：换个场景或换一批数据，你的方案还成立吗
+- 动机槽：为什么选这个方向与岗位
+- 反思槽：现在回头看你会怎么改
+深挖阶段优先事实槽+机制槽+数字槽；项目讨论交替使用取舍槽/失败槽/协作槽；收尾阶段才多用动机槽/迁移槽/反思槽。
+
+【三层追问（同一锚点必须追到底，禁止问一层就换话题）】
+第一层 澄清（消除模糊表述）→ 第二层 展开（定位个人贡献）→ 第三层 深挖（逼近机制与边界）
+满足以下任一条件即换题：①已取得具体数字、机制解释、一次真实失败、明确取舍中的任一项；
+②候选人连续两次答不出或明显回避（标记为"后续可补考"并降级换题，不要连环施压）；
+③该锚点已追问三层且无新信息。
+
+【反套路（防背稿与糊弄）】
+- 用术语糊弄时：要求"用一句话讲给外专业的人听"
+- 答得过于顺畅、高度模板化时：追问边界与反例（"这个方法什么场景下不成立？"）
+- 引用团队成果时：追问个人动作与可验证细节（"具体哪部分是你写的？"）
+
+【合规红线（优先于一切提问策略，触碰即替换为不越界的问法）】
+- 严禁把性别、年龄、婚育状况、地域户籍、民族、院校出身、外貌、健康状况、家庭背景
+  作为提问内容或评价依据
+- 候选人主动提到上述话题时自然带过，不追问、不评价、不记为弱点
+- 不臆造候选人没说过的事实；不承诺录用结果；不建议夸大或虚构经历
+
 【你的工作方式（ReAct：Thought → Action → Observation → Answer）】
-- 收到候选人回答后：先调用 evaluate_answer 快速评估，拿到追问信号（follow_up）；
+- 收到候选人回答后：先调用 evaluate_answer 快速评估，拿到追问信号（follow_up）与建议槽位；
   需要简历细节时调用 get_resume_section（如 projects / education / skills），不要假设简历全文可见；
   抛出问题前调用 check_question_asked 确认没有重复提问；判断信息已足够时调用 end_interview 输出收尾语。
 - 最后一步永远是：直接输出下一个问题文本（这是你的 Answer，也是唯一对候选人可见的内容）。
@@ -62,6 +92,20 @@ def _resume_index(resume_text: str) -> str:
     if not text:
         return "（未提供简历）"
     return text[:MAX_RESUME_INDEX_CHARS]
+
+
+def _plan_block(resume_text: str) -> str:
+    """取面试前分析并格式化为 system 片段；未命中缓存返回空串（不阻塞提问）。
+
+    缓存由创建面试时的后台预热填充（见 services/interview_plan.py）。
+    """
+    try:
+        plan = get_cached_plan(resume_text)
+    except Exception:
+        logger.exception("读取面试前分析失败（不影响面试）")
+        return ""
+    block = format_plan_for_prompt(plan)
+    return f"\n{block}\n" if block else ""
 
 
 def _infer_phase(state: InterviewState) -> str:
@@ -80,7 +124,7 @@ def _infer_phase(state: InterviewState) -> str:
 
 
 def build_agent_messages(state: InterviewState) -> list:
-    """构建 Agent 消息列表：system(岗位+简历索引+阶段+工具指引) + 最近 N 轮历史。
+    """构建 Agent 消息列表：system(岗位+简历索引+深挖计划+阶段+工具指引) + 最近 N 轮历史。
 
     history 元素形如 {"role": "user"|"assistant", "content": str}。
     """
@@ -89,6 +133,7 @@ def build_agent_messages(state: InterviewState) -> list:
             job_position=state.job_position or "AI应用开发",
             phase=_infer_phase(state),
             resume_text=_resume_index(state.resume_text),
+            plan_block=_plan_block(state.resume_text),
         ))
     ]
     recent = state.history[-MAX_HISTORY_ROUNDS * 2:]

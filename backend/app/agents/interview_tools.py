@@ -55,6 +55,19 @@ FOLLOW_UP_OPTIONS = (
     "move_on",
 )
 
+# 提问槽位枚举（与 interview_agent.AGENT_SYSTEM 的九类槽位一一对应）
+SLOT_OPTIONS = (
+    "fact",           # 事实槽：具体做了什么
+    "mechanism",      # 机制槽：为什么这么做、原理
+    "tradeoff",       # 取舍槽：其他方案与取舍
+    "failure",        # 失败槽：踩坑与定位过程
+    "number",         # 数字槽：数字口径与基数
+    "collaboration",  # 协作槽：决策归属与协作
+    "transfer",       # 迁移槽：换场景是否成立
+    "motivation",     # 动机槽：为什么选这个方向
+    "reflection",     # 反思槽：回头看会怎么改
+)
+
 # ---- check_question_asked 常量 ----
 
 # 字符集合 Jaccard 相似度阈值：≥该值判断为重复提问
@@ -71,9 +84,9 @@ DEFAULT_CLOSING = "今天的面试到这里就结束了。你可以点击「结�
 EVAL_SYSTEM = """你是资深技术面试官的评估助手，负责对候选人刚给出的面试回答做**快速评估**，辅助面试官决定如何追问。只返回紧凑JSON（不要任何解释、不要markdown、不要多余换行缩进）。
 
 JSON结构（字段名不要改）：
-{"substance": 1到3整数, "structure": 1到3整数, "clarity": 1到3整数, "depth": 1到3整数, "evidence": "一句话证据（引用回答原文要点）", "follow_up": "追问策略信号"}
+{"substance": 1到3整数, "structure": 1到3整数, "clarity": 1到3整数, "depth": 1到3整数, "evidence": "一句话证据（引用回答原文要点）", "follow_up": "追问策略信号", "slot": "建议下一问的槽位"}
 
-维度定义（尽量苛刻：4分及以上才值得深挖，多数应届生回答集中在2-3分）：
+维度定义（尽量苛刻，多数应届生回答集中在2分）：
 - substance（实质证据）：回答里有多少具体事实、量化数字、技术细节。1=空泛口号；2=有细节但无量化；3=有量化+权衡+结果
 - structure（叙事结构）：1=意识流无重点；2=有结构但衔接生硬；3=铺垫→冲突→解决→影响
 - clarity（表达清晰）：1=含糊笼统；2=清楚但有冗余；3=简洁准确
@@ -86,7 +99,13 @@ follow_up 只能取以下枚举之一：
 - check_knowledge：回答偏乏力，需要回到技术基础或场景题验证
 - move_on：信息已充分或该话题意义不大，建议换话题
 
-应届生/校招（0-3年）校准：substance=3 必须含至少一个量化数字；clarity=3 不要求深度但必须聚焦。所有内容使用中文。"""
+slot 只能取以下枚举之一，表示下一问最该用的提问角度：
+- fact：问具体做了什么 - mechanism：问原理与机制 - tradeoff：问其他方案与取舍
+- failure：问踩坑与定位过程 - number：问数字口径与基数 - collaboration：问决策归属与协作
+- transfer：问换场景是否成立 - motivation：问动机 - reflection：问反思
+
+应届生/校招（0-3年）校准：substance=3 必须含至少一个量化数字；clarity=3 不要求深度但必须聚焦。
+合规：不得因性别、年龄、地域、院校、外貌等个人特征改变评价；回答过短（不足200字）由系统直接处理，无需你判断。所有内容使用中文。"""
 
 
 def _slice_resume(resume_text: str, section: str) -> str:
@@ -141,6 +160,7 @@ def _neutral_eval_json(reason: str) -> str:
             "depth": 2,
             "evidence": reason,
             "follow_up": "move_on",
+            "slot": "fact",
         },
         ensure_ascii=False,
     )
@@ -158,6 +178,9 @@ def _sanitize_eval(data: dict) -> dict:
     follow_up = str(data.get("follow_up", "move_on") or "move_on").strip()
     if follow_up not in FOLLOW_UP_OPTIONS:
         follow_up = "move_on"
+    slot = str(data.get("slot", "fact") or "fact").strip()
+    if slot not in SLOT_OPTIONS:
+        slot = "fact"
     return {
         "substance": clamp_score(data.get("substance")),
         "structure": clamp_score(data.get("structure")),
@@ -165,6 +188,7 @@ def _sanitize_eval(data: dict) -> dict:
         "depth": clamp_score(data.get("depth")),
         "evidence": str(data.get("evidence") or "")[:200],
         "follow_up": follow_up,
+        "slot": slot,
     }
 
 
@@ -193,10 +217,12 @@ def build_evaluate_answer(state: InterviewState):
 
     @tool
     def evaluate_answer(candidate_answer: str) -> str:
-        """快速评估候选人刚给出的回答的四维质量，并给出追问策略信号。
+        """快速评估候选人刚给出的回答的四维质量，并给出追问策略信号与建议槽位。
 
-        返回 JSON：substance/structure/clarity/depth（1-3 分）+ evidence + follow_up
-        （deepen_project / clarify_role / probe_contradiction / check_knowledge / move_on）。
+        返回 JSON：substance/structure/clarity/depth（1-3 分）+ evidence
+        + follow_up（deepen_project / clarify_role / probe_contradiction / check_knowledge / move_on）
+        + slot（下一问建议槽位：fact / mechanism / tradeoff / failure / number /
+        collaboration / transfer / motivation / reflection）。
         回答不足 200 字时不调用 LLM，返回中性评估。
         """
         answer = (candidate_answer or "").strip()
@@ -210,7 +236,7 @@ def build_evaluate_answer(state: InterviewState):
             logger.warning("evaluate_answer 调用失败: %s", e)
             return _neutral_eval_json("评估暂时不可用，按中性处理")
         state.note_tool("evaluate_answer", f"chars={len(answer)}",
-                        f"follow_up={result['follow_up']}")
+                        f"follow_up={result['follow_up']}, slot={result['slot']}")
         return json.dumps(result, ensure_ascii=False)
 
     return evaluate_answer

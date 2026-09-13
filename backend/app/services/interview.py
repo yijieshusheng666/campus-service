@@ -4,6 +4,7 @@
 提问走 app/agents/interview_agent.py 的 ReAct 主循环（工具轮静默、回答轮流式，
 SSE 事件契约与改造前完全一致；不支持工具调用的模型自动降级纯文本）。
 """
+import json
 import logging
 from collections.abc import AsyncGenerator
 
@@ -11,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agents.interview_agent import agent_stream_question
 from app.agents.interview_state import InterviewState
+from app.core.utils import mask_pii
 from app.services.llm import _build_llm, _msg_text, _robust_json_parse
 
 logger = logging.getLogger(__name__)
@@ -36,26 +38,44 @@ INTERVIEWER_SYSTEM = """你是一位资深的技术面试官，正在对候选�
 """
 
 REPORT_SYSTEM = """你是资深面试教练，基于一场完整的模拟面试记录输出教练式评估报告（debrief）。
-评估使用五维量规（每维 1-5 分），并按应届生/校招（0-3 年）标准校准：4 分=具体例子+至少一个量化数字；差异化可来自学习速度与求知欲。
+评估按应届生/校招（0-3 年）标准校准：差异化可来自学习速度与求知欲。
+
+【评分标尺（行为锚点，不是印象分）】
+每个维度统一按以下行为描述定档，且必须能引用候选人原话作为依据：
+- 1 分：答非所问 / 回避问题 / 编造，或该维度完全没有可用信息
+- 3 分：有结论但缺依据（给了说法，给不出数据、机制或过程）
+- 5 分：结论、依据、适用边界齐全（说了什么、为什么、以及何时不成立）
+- 2 分、4 分介于相邻两档之间
+禁止给出标尺无法对应的分数：找不到依据的维度宁可给低分，也不要凭印象抬高。
 
 五维定义：
 - substance（实质证据）：证据质量与深度。1=空泛口号无证据；3=具体但未量化；5=量化+备选方案权衡+决策依据+结果
 - structure（叙事结构）：1=意识流无重点；3=有结构但衔接生硬；5=铺垫→冲突→解决→影响，句句推进
 - relevance（切题聚焦）：1=答非所问；3=切题但有无关细节；5=句句服务于回答
-- credibility（可信度）：1=夸大无支撑；3=细节具体但缺结果；5=数字+佐证+他人认可+真实约束
+- credibility（可信度）：1=夸大无支撑；3=细节具体但缺结果；5=数字+佐证+真实约束
 - differentiation（差异化）：1=任何人都能说的答案；3=有细节但无独到洞察；5=只有这位候选人才能给出的经验与观点
+
+【红线检查（不参与加权，触发即影响结论）】
+逐项核对是否存在：背稿式回答（通篇模板化、无个人细节）／编造经历（前后矛盾或与简历不符）／
+基础概念空白（岗位核心概念完全说不清）／被指出错误后强辩／贬低他人或团队。
+触发任一项必须写入 red_flags，且 conclusion 不得为 pass。
 
 **只返回紧凑JSON（不要任何解释、markdown、多余换行缩进）**。
 
 JSON结构（字段名不要改）：
-{"overall_score": 0到100整数, "hire_signal": "strong_hire|hire|mixed|no_hire", "summary": "一句话：这场面试会给面试官留下什么整体印象", "dimensions": [{"name": "substance|structure|relevance|credibility|differentiation", "score": 1到5整数, "comment": "证据化评价，必须引用候选人原话"}], "per_question": [{"index": 从1开始的序号, "question": "面试官问题摘要", "scores": {"substance": 1到5, "structure": 1到5, "relevance": 1到5, "credibility": 1到5, "differentiation": 1到5}, "strongest": "这题回答中最强的时刻", "missed": "错失的机会"}], "patterns": {"crutch_phrases": ["反复出现的口头禅/套路表述"], "avoided_topics": ["回避或绕开的话题"], "best_moment": "全场最佳时刻（引用原话）", "worst_moment": "最弱时刻及当时表现"}, "top_changes": ["下一场面试最该改的3件事，具体可执行"]}
+{"overall_score": 0到100整数, "conclusion": "pass|pending|fail", "hire_signal": "strong_hire|hire|mixed|no_hire", "summary": "一句话：这场面试会给面试官留下什么整体印象", "red_flags": ["触发的红线及原话定位"], "dimensions": [{"name": "substance|structure|relevance|credibility|differentiation", "score": 1到5整数, "comment": "证据化评价，必须引用候选人原话"}], "per_question": [{"index": 从1开始的序号, "question": "面试官问题摘要", "scores": {"substance": 1到5, "structure": 1到5, "relevance": 1到5, "credibility": 1到5, "differentiation": 1到5}, "strongest": "这题回答中最强的时刻", "missed": "错失的机会"}], "patterns": {"crutch_phrases": ["反复出现的口头禅/套路表述"], "avoided_topics": ["回避或绕开的话题"], "best_moment": "全场最佳时刻（引用原话）", "worst_moment": "最弱时刻及当时表现"}, "top_changes": ["下一场面试最该改的3件事，具体可执行"]}
 
 要求：
-1. hire_signal 按整体表现定级：strong_hire=多维度4-5分且展现独特价值；hire=多数3-4分、短板可辅导；mixed=表现不稳定；no_hire=多维度低分或证据严重不足
-2. dimensions 五维分数按整场综合表现给出；comment 必须引用候选人原话作为证据，禁止空泛评价
-3. per_question 覆盖每一轮候选人回答（面试官的提问不算）；strongest/missed 要具体
-4. top_changes 恰好 3 条，按影响力排序，针对本场暴露的最大短板给出可执行的改法（如何练、改什么）
-5. 所有内容使用中文
+1. conclusion 只取三值：pass（可进入下一轮）/ pending（待定，补强后可再评）/ fail（明显不匹配）。
+   依据 = 五维锚点评分 + 红线检查 + 简历风险点命中情况；有红线触发时不得为 pass
+2. hire_signal 必须与 conclusion 一致：strong_hire / hire → pass；mixed → pending；no_hire → fail
+3. overall_score 是给前端展示的参考分，不得与 conclusion 矛盾（conclusion 为 fail 时不应出现高分）
+4. dimensions 五维分数按整场综合表现给出；comment 必须引用候选人原话作为证据，禁止空泛评价
+5. per_question 覆盖每一轮候选人回答（面试官的提问不算）；strongest/missed 要具体
+6. red_flags 引用原话定位触发的红线；无触发则为空数组
+7. top_changes 恰好 3 条，按影响力排序，针对本场暴露的最大短板给出可执行的改法（如何练、改什么）
+8. 报告中不得出现候选人的手机号、邮箱、证件号等隐私信息；引用回答时若含此类内容一律以"[已脱敏]"替代
+9. 所有内容使用中文
 """
 
 
@@ -144,6 +164,26 @@ async def generate_report(
         report.setdefault("per_question", [])
         report.setdefault("patterns", {})
         report.setdefault("top_changes", [])
+        report.setdefault("conclusion", "")
+        report.setdefault("red_flags", [])
+
+        # 结论取值校验：非法值清空（前端按字段有无决定是否展示结论块）
+        if report.get("conclusion") not in ("pass", "pending", "fail"):
+            report["conclusion"] = ""
+
+        # 一致性兜底（代码而非提示词）：触发红线时结论不得为「过」。
+        # 这类约束写在 prompt 里模型多数会遵守，但结论是给人看的定性判断，
+        # 不能把「是否违反红线」这种硬规则交给模型自觉 —— 冲突时由代码降级。
+        if isinstance(report.get("red_flags"), list) and report["red_flags"]:
+            if report["conclusion"] == "pass":
+                logger.warning("报告结论与红线检查冲突，已将 conclusion 降级为 pending")
+                report["conclusion"] = "pending"
+
+        # 隐私兜底：模型可能引用简历中的联系方式，整份报告序列化后统一脱敏再落库
+        try:
+            report = json.loads(mask_pii(json.dumps(report, ensure_ascii=False)))
+        except Exception:
+            logger.warning("报告脱敏后无法反序列化，保留原报告")
         return report
     except Exception:
         logger.exception("评估报告生成失败")

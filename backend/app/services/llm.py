@@ -308,6 +308,113 @@ def advise_resume(resume_text: str, job_requirement: str | None = None) -> dict:
         return {}
 
 
+# ---- 面试前简历分析（深挖计划）----
+# 借鉴 campus-interviewer 的 resume-parsing.md：先判定简历形态、再生成深挖清单，
+# 避免对「无实习/跨专业/经历空白」的候选人套用同一套标准问法。
+
+# 简历形态枚举（可叠加，如 无实习 + 跨专业）
+PLAN_PROFILES = (
+    "no_internship",      # 无实习型
+    "pure_campus",        # 纯校园经历型
+    "cross_major",        # 跨专业转行型
+    "weak_school",        # 学历背景较弱型
+    "research",           # 科研论文型
+    "multi_short_intern", # 多段短实习型
+    "single_long",        # 单段长经历型
+    "startup",            # 创业自由职业型
+    "non_tech",           # 非技术岗
+    "gap",                # 经历明显空白型
+)
+
+# 追问动作枚举（三层递归追问树的具体化）
+PLAN_PATH_STEPS = ("clarify", "expand", "dig", "number", "tradeoff", "failure")
+
+INTERVIEW_PLAN_SYSTEM = """你是资深技术面试官的面试前分析助手。基于候选人简历产出一份**深挖计划**，供面试官提问时参考。只返回紧凑JSON（不要任何解释、不要markdown、不要多余换行缩进）。
+
+JSON结构（字段名不要改）：
+{"profile":["简历形态枚举"],"highlight":"开场亮点题","targets":[{"anchor":"简历中的具体锚点","signals":"命中的风险信号","priority":"must|may","path":["追问动作"]}],"risks":["风险点"]}
+
+profile 只能取以下枚举，可叠加（如既无实习又跨专业就都列出）：
+no_internship|pure_campus|cross_major|weak_school|research|multi_short_intern|single_long|startup|non_tech|gap
+
+targets 规则（最多 6 条，按优先级从高到低）：
+1. 命中以下信号的点列为 must：任意数字（如"提升30%"）→ 追问基线、测法、归属；
+   优化/主导/负责/搭建 → 追问原状、改动、验证；技术名词堆砌 → 追问机制而非名词复述；
+   从0到1/独立完成 → 追问限制条件与放弃的方案；获奖/排名 → 追问参选基数与个人动作
+2. anchor 必须引用简历原文中的具体名称（项目名/公司/技能/数字），禁止泛泛而谈
+3. path 是从浅到深的追问动作数组，只能取：clarify（澄清模糊表述）|expand（定位个人贡献）|dig（逼近机制与边界）|number（追问数字口径）|tradeoff（追问其他方案与取舍）|failure（追问踩坑与定位过程）
+4. 若候选人无实习无项目，把课程设计、竞赛、自学项目、校园经历列为锚点，考察自驱力与完整交付能力
+5. 不因院校层次、专业出身列为风险点
+
+risks 只列真实存在的问题（无则空数组），不要凑数。
+所有内容使用中文。"""
+
+
+def _normalize_plan(data: dict) -> dict:
+    """规范化面试前分析结果：枚举白名单过滤 + 字段兜底，非法值丢弃而非报错。"""
+    profiles = [
+        str(p).strip()
+        for p in (data.get("profile") or [])
+        if str(p).strip() in PLAN_PROFILES
+    ]
+    targets = []
+    for t in (data.get("targets") or [])[:6]:
+        if not isinstance(t, dict):
+            continue
+        anchor = str(t.get("anchor") or "").strip()
+        if not anchor:
+            continue
+        priority = str(t.get("priority") or "may").strip().lower()
+        if priority not in ("must", "may"):
+            priority = "may"
+        path = [
+            str(s).strip()
+            for s in (t.get("path") or [])
+            if str(s).strip() in PLAN_PATH_STEPS
+        ]
+        targets.append({
+            "anchor": anchor[:120],
+            "signals": str(t.get("signals") or "").strip()[:120],
+            "priority": priority,
+            "path": path,
+        })
+    risks = [str(r).strip()[:120] for r in (data.get("risks") or []) if str(r).strip()][:5]
+    return {
+        "profile": profiles,
+        "highlight": str(data.get("highlight") or "").strip()[:200],
+        "targets": targets,
+        "risks": risks,
+    }
+
+
+def analyze_resume_for_interview(resume_text: str) -> dict:
+    """面试前简历分析：返回 {"profile","highlight","targets","risks"}，失败返回空 dict。
+
+    这是一次性的前置分析（同步阻塞，调用方应放入线程池并缓存结果），
+    产出面试官后续提问所依据的深挖清单。
+    """
+    text = (resume_text or "").strip()
+    if not text:
+        return {}
+    chain = _extract_text_chain(INTERVIEW_PLAN_SYSTEM, disable_thinking=True)
+    try:
+        logger.info("面试前简历分析，文本长度: %d", len(text))
+        raw = chain.invoke({"text": text[:12000]}) or ""
+        parsed = _robust_json_parse(raw)
+        if not parsed:
+            logger.warning("面试前分析 JSON 解析失败，原文起始: %s", raw[:200])
+            return {}
+        plan = _normalize_plan(parsed)
+        logger.info(
+            "分析完成：形态=%s，锚点=%d，风险=%d",
+            plan["profile"], len(plan["targets"]), len(plan["risks"]),
+        )
+        return plan
+    except Exception:
+        logger.exception("面试前简历分析失败")
+        return {}
+
+
 def _normalize_resume_payload(data: dict) -> dict:
     sections = _normalize_sections(data.get("sections"))
     top_github = str(data.get("github", "") or "").strip()

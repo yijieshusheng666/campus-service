@@ -10,16 +10,26 @@
       <el-card class="score-card">
         <div class="overall">
           <div class="number">{{ report.overall_score }}</div>
-          <div class="label">综合得分 / 100</div>
+          <div class="label">综合得分 / 100（参考值）</div>
         </div>
-        <el-tag v-if="hireSignal.label" :type="hireSignal.type" size="large" effect="dark" class="hire-tag">
+        <el-tag v-if="conclusion" :type="conclusion.type" size="large" effect="dark" class="hire-tag">
+          {{ conclusion.label }}
+        </el-tag>
+        <el-tag v-else-if="hireSignal.label" :type="hireSignal.type" size="large" effect="dark" class="hire-tag">
           {{ hireSignal.label }}
         </el-tag>
         <div v-if="report.summary" class="report-summary">{{ report.summary }}</div>
       </el-card>
 
+      <el-card v-if="report.red_flags?.length" class="section red-flag-card">
+        <template #header>红线检查（触发任一项，结论不得为「过」）</template>
+        <ul class="red-flags">
+          <li v-for="(f, i) in report.red_flags" :key="i">{{ f }}</li>
+        </ul>
+      </el-card>
+
       <el-card class="section">
-        <template #header>五维评分（1-5 分，按应届生标准校准）</template>
+        <template #header>五维评分（按行为锚点定档：1=答非所问 / 3=有结论无依据 / 5=结论+依据+适用边界）</template>
         <div v-for="d in report.dimensions" :key="d.name" class="dim">
           <span class="dim-name">{{ dimLabel(d.name) }}</span>
           <el-progress :percentage="(d.score || 0) * 20" :stroke-width="12" style="flex: 1; margin: 0 16px" />
@@ -139,9 +149,17 @@ const hireSignalMap = {
 }
 const hireSignal = computed(() => hireSignalMap[report.value?.hire_signal] || { label: '', type: 'info' })
 
+// 结论三档：比 hire_signal 更克制，是报告的主要定性判断（旧报告无此字段则回退展示 hire_signal）
+const conclusionMap = {
+  pass: { label: '结论：过', type: 'success' },
+  pending: { label: '结论：待定', type: 'warning' },
+  fail: { label: '结论：挂', type: 'danger' },
+}
+const conclusion = computed(() => conclusionMap[report.value?.conclusion] || null)
+
 const isCoachReport = computed(() => {
   const r = report.value
-  return !!(r && (r.per_question?.length || r.hire_signal))
+  return !!(r && (r.per_question?.length || r.hire_signal || r.conclusion))
 })
 
 const patterns = computed(() => report.value?.patterns || {})
@@ -170,6 +188,9 @@ onMounted(async () => {
 .hire-tag { margin-top: 10px; }
 .report-summary { margin-top: 12px; color: var(--el-text-color-regular); font-size: 14px; }
 .section { margin-bottom: 16px; }
+.red-flag-card { border-left: 3px solid var(--el-color-danger); }
+.red-flags { color: var(--el-color-danger); }
+.red-flags li { margin-bottom: 6px; line-height: 1.7; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .dim { display: flex; align-items: center; margin-bottom: 8px; }
 .dim-name { width: 110px; flex-shrink: 0; }

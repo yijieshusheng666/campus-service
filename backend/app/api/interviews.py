@@ -1,4 +1,5 @@
 """AI 模拟面试 API：创建(SSE 首题) / 列表 / 详情 / 对话(SSE) / 结束生成报告。"""
+import asyncio
 import json
 import logging
 
@@ -9,16 +10,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
+from app.core.utils import mask_pii
 from app.database import AsyncSessionLocal, get_db
 from app.models.interview import InterviewMessage, InterviewStatus, MockInterview
 from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.interview import InterviewChatIn, InterviewCreate, InterviewDetailOut, InterviewOut
 from app.services.interview import generate_report, stream_question
+from app.services.interview_plan import prewarm_plan
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/interviews", tags=["模拟面试"])
+
+# 后台任务强引用集：事件循环只持弱引用，不保活的任务可能被 GC 中途回收
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_bg(coro) -> None:
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+
+    def _on_done(task: asyncio.Task) -> None:
+        _bg_tasks.discard(task)
+        if not task.cancelled() and task.exception():
+            logger.error("后台任务异常: %s", task.exception())
+
+    t.add_done_callback(_on_done)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -41,7 +59,12 @@ async def _load_own_interview(db: AsyncSession, interview_id: int, user: User) -
 
 
 def _resume_to_text(resume: Resume | None) -> str:
-    """把简历转为注入 LLM 的文本：优先用户编辑版，其次解析结果，最后原文。"""
+    """把简历转为注入 LLM 的文本：优先用户编辑版，其次解析结果，最后原文。
+
+    出口统一做隐私脱敏（手机号/邮箱/身份证/固话）：面试官不需要这些信息，
+    报告也不应出现，而简历文本会送往第三方大模型。单点收口保证
+    「面试前分析」「面试官 system」「章节工具」三条下游全部拿到脱敏文本。
+    """
     if not resume:
         return ""
     data = resume.edited_data or {}
@@ -58,8 +81,8 @@ def _resume_to_text(resume: Resume | None) -> str:
                     x for x in (it.get("heading"), it.get("subheading"), it.get("date")) if x
                 )
                 parts.append(f"- {head}\n  {it.get('description', '')}" if head else f"- {it.get('description', '')}")
-        return "\n".join(parts)
-    return resume.raw_text or ""
+        return mask_pii("\n".join(parts))
+    return mask_pii(resume.raw_text or "")
 
 
 def _to_out(itv: MockInterview) -> dict:
@@ -128,6 +151,11 @@ async def create_interview(
     db.add(itv)
     await db.commit()
     await db.refresh(itv)
+
+    # 后台预热面试前分析（深挖计划）：首题不等待它，用户在听开场题/作答的这段时间里
+    # 分析即可完成并进入缓存，后续各轮提问自动带上深挖清单（未就绪则退化为无计划）。
+    if resume_text:
+        _spawn_bg(prewarm_plan(resume_text))
 
     async def gen():
         # start 事件先告知 interview_id，前端据此可更新路由
