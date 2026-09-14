@@ -17,8 +17,6 @@ const files = [
   'src/views/interview/InterviewChat.vue',
   'src/views/interview/InterviewList.vue',
   'src/views/interview/InterviewReport.vue',
-  'src/utils/recorder.js',
-  'src/utils/speech.js',
   'src/api/interview.js'
 ]
 
