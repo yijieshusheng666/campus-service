@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     DB_ECHO: bool = False
     DATABASE_URL: str = ""
 
+    # --- Redis / 任务队列（可选组件）---
+    # 留空 = 单机模式：后台任务走 asyncio、WebSocket 推送走进程内存，uvicorn workers 只能开 1。
+    # 配置后 = 分布式模式：简历解析交给 Celery worker、WS 推送走 Redis pub/sub，
+    # workers 可以多开（docker-compose.yml 与 deploy/ 均已按此模式配好）。
+    REDIS_URL: str = ""
+
     # --- JWT ---
     SECRET_KEY: str = "CHANGE_ME_campus_platform_secret"
     JWT_ALGORITHM: str = "HS256"
@@ -111,6 +117,10 @@ class Settings(BaseSettings):
             f"mysql+asyncmy://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
         )
+
+    @property
+    def redis_enabled(self) -> bool:
+        return bool(self.REDIS_URL)
 
     @property
     def cors_origins_list(self) -> list[str]:

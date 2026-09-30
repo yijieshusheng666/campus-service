@@ -13,6 +13,7 @@ from sqlalchemy import update
 from app.api import api_router
 from app.api import ws as ws_api
 from app.config import settings
+from app.core.redis_client import close_redis
 from app.database import AsyncSessionLocal
 from app.models.resume import ParseStatus, Resume
 
@@ -36,6 +37,7 @@ description = """
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 进程重启会丢失进行中的后台解析任务：遗留 pending 一律标记为 failed，用户可手动重试
+    # （分布式模式下任务在 Celery worker 里执行，不受 API 进程重启影响，这里只是兜底）
     async with AsyncSessionLocal() as db:
         await db.execute(
             update(Resume)
@@ -43,7 +45,11 @@ async def lifespan(app: FastAPI):
             .values(parse_status=ParseStatus.failed)
         )
         await db.commit()
+    # 分布式模式：启动 WS 推送的 Redis 桥（单机模式下内部直接返回，无副作用）
+    await ws_api.start_redis_bridge()
     yield
+    await ws_api.stop_redis_bridge()
+    await close_redis()
 
 
 app = FastAPI(

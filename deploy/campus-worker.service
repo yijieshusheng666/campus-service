@@ -1,0 +1,38 @@
+# ============================================================
+# 校园综合服务平台 —— Celery worker（分布式模式的任务消费者）
+# 放置路径：/etc/systemd/system/campus-worker.service
+#
+# 启用（仅在 .env 配好 REDIS_URL 后）：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now campus-worker
+#   sudo systemctl status campus-worker
+#
+# 配套：服务器上装 Redis —— sudo apt install redis-server（默认监听 127.0.0.1:6379）
+# ============================================================
+
+[Unit]
+Description=Campus Platform Celery Worker
+After=network-online.target redis-server.service mysql.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=campus
+Group=campus
+WorkingDirectory=/opt/campus/backend
+EnvironmentFile=/opt/campus/backend/.env
+
+# threads 池：LLM 调用是 IO 等待型任务，多线程足够；--concurrency 按机器内存调
+ExecStart=/opt/campus/backend/.venv/bin/celery -A app.tasks.celery_app worker \
+    --loglevel=info --pool=threads --concurrency=4
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=campus-worker
+
+[Install]
+WantedBy=multi-user.target

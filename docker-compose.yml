@@ -66,6 +66,32 @@ services:
     networks:
       - campus
 
+  celery:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    # 覆盖镜像默认的 uvicorn 启动命令，跑 Celery worker 消费解析任务
+    command: celery -A app.tasks.celery_app worker --loglevel=info --pool=threads --concurrency=4
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD:-campus_root_pwd}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: prod
+      DEBUG: "false"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - campus
+
   web:
     build:
       context: .
