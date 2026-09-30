@@ -1,10 +1,12 @@
 """FastAPI 应用入口。"""
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import update
 
@@ -13,6 +15,8 @@ from app.api import ws as ws_api
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.resume import ParseStatus, Resume
+
+logger = logging.getLogger("campus")
 
 UPLOAD_DIR = Path(settings.UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,6 +70,35 @@ app.include_router(api_router)
 
 # WebSocket 私信（挂载在根路径 /ws，token 走 query 参数）
 app.include_router(ws_api.router)
+
+
+# ---------------- 请求日志中间件 ----------------
+# 记录每个请求的方法、路径、状态码、耗时；/ws 的 query 里带 token，不记 query 防令牌落日志
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "%s %s -> %s (%.1fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
+# ---------------- 全局异常处理 ----------------
+# 未捕获异常统一返回 500 JSON，并把完整堆栈写进日志（journald 收集），
+# 避免 FastAPI 默认行为把内部错误细节直接暴露给调用方
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("未捕获异常: %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "服务器内部错误，请稍后重试"},
+    )
 
 
 # 确保 application logger 输出到 uvicorn stderr（含 agent trace 等调试信息）
