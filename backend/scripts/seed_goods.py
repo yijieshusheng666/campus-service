@@ -13,6 +13,7 @@
 import argparse
 import asyncio
 import logging
+import os
 
 import httpx
 
@@ -29,7 +30,14 @@ API_URL = "https://dummyjson.com/products"
 # 专用卖家账号（默认；如已存在则复用，不动原密码）
 SELLER_USERNAME = "xiaoyu_admin"
 SELLER_EMAIL = "xiaoyu_admin@campus.local"
-SELLER_PASSWORD = "Admin@123456"
+# 口令从环境变量读取，不再硬编码；本地跑脚本时先 export SEED_SELLER_PASSWORD=...
+# 未设置时给一个仅本地可用的随机串，避免公网库里留下已知口令的账号
+SELLER_PASSWORD = os.environ.get("SEED_SELLER_PASSWORD") or None
+if SELLER_PASSWORD is None:
+    import secrets
+
+    SELLER_PASSWORD = secrets.token_urlsafe(16)
+    logger.warning("未设置 SEED_SELLER_PASSWORD，已为种子卖家生成随机口令（无法登录，仅用于占位）")
 
 # 把 DummyJSON 的品类映射成本平台的前端分类（无匹配则用"其他"）
 CATEGORY_MAP = {
