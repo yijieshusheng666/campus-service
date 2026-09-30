@@ -79,6 +79,11 @@
           </el-menu-item>
         </el-sub-menu>
 
+        <el-menu-item index="/announcements">
+          <el-icon class="menu-icon"><Bell /></el-icon>
+          <span>平台公告</span>
+        </el-menu-item>
+
         <el-sub-menu index="career">
           <template #title>
             <el-icon class="menu-icon"><Briefcase /></el-icon>
@@ -102,6 +107,10 @@
         <el-menu-item v-if="auth.user?.is_admin" index="/admin" class="admin-entry">
           <el-icon class="menu-icon"><Monitor /></el-icon>
           <span>管理后台</span>
+        </el-menu-item>
+        <el-menu-item v-if="auth.user?.is_admin" index="/admin/announcements" class="admin-entry">
+          <el-icon class="menu-icon"><EditPen /></el-icon>
+          <span>公告管理</span>
         </el-menu-item>
       </el-menu>
 
@@ -185,7 +194,7 @@ import { getConversations } from '@/api/message'
 import SmartSupport from '@/components/SmartSupport.vue'
 import {
   School, Goods, Briefcase, User, SwitchButton, Setting, Van, ChatDotRound,
-  Monitor, Menu, Close
+  Monitor, Menu, Close, Bell, EditPen
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -231,6 +240,8 @@ const breadcrumbMap = {
   '/interviews': 'AI 模拟面试',
   '/errands': '跑腿大厅',
   '/errands/publish': '发布跑腿需求',
+  '/announcements': '平台公告',
+  '/admin/announcements': '公告管理',
   '/chat': '我的私信',
   '/settings': '账号设置'
 }
