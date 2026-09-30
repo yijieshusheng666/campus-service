@@ -1,9 +1,7 @@
-"""平台公告：浏览权限、管理端 CRUD、AI 摘要任务（monkeypatch 掉 LLM）。"""
+"""平台公告：浏览权限、上下架规则、管理端 CRUD。"""
 import pytest
 from sqlalchemy import select
 
-import app.api.announcements as ann_api
-from app.models.announcement import Announcement
 from app.models.user import User
 from tests.conftest import TestingSessionLocal
 
@@ -15,16 +13,6 @@ async def admin_client(auth_client):
         user.is_admin = True
         await db.commit()
     yield auth_client
-
-
-@pytest.fixture(autouse=True)
-def _no_summary_bg(monkeypatch):
-    """禁掉创建/更新时的后台摘要任务：它是 fire-and-forget，测试里会触网调 LLM。"""
-    def _close(coro):
-        coro.close()
-
-    monkeypatch.setattr(ann_api.spawn_bg, "__call__", lambda coro: _close(coro))
-    monkeypatch.setattr(ann_api, "spawn_bg", lambda coro: _close(coro))
 
 
 async def _create(admin_client, title="期中考试安排", content="第 10 周期中考试，具体考场见教务系统。"):
@@ -82,27 +70,6 @@ async def test_detail_offline_returns_404(admin_client, auth_client):
     await admin_client.put(f"/api/v1/announcements/{data['id']}", json={"is_online": False})
     resp = await auth_client.get(f"/api/v1/announcements/{data['id']}")
     assert resp.status_code == 404
-
-
-async def test_summary_task_falls_back_to_content_slice(monkeypatch, admin_client):
-    """LLM 返回空时，摘要回落为正文前 80 字。"""
-    data = await _create(admin_client)
-    monkeypatch.setattr(ann_api, "summarize_announcement", lambda content: "")
-    await ann_api.generate_summary_task(data["id"], TestingSessionLocal)
-    async with TestingSessionLocal() as db:
-        ann = (await db.execute(select(Announcement))).scalar_one()
-    assert ann.summary and len(ann.summary) <= 80
-
-
-async def test_summary_task_uses_llm_result(monkeypatch, admin_client):
-    data = await _create(admin_client)
-    monkeypatch.setattr(
-        ann_api, "summarize_announcement", lambda content: "第10周期中考试，考场见教务系统"
-    )
-    await ann_api.generate_summary_task(data["id"], TestingSessionLocal)
-    async with TestingSessionLocal() as db:
-        ann = (await db.execute(select(Announcement))).scalar_one()
-    assert ann.summary == "第10周期中考试，考场见教务系统"
 
 
 async def test_admin_can_delete(admin_client, auth_client):

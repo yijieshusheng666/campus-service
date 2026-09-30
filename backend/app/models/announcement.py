@@ -1,4 +1,4 @@
-"""平台公告模型：管理员发布 → 全员可见，支持置顶与 AI 摘要。"""
+"""平台公告模型：管理员发布 → 全员可见，支持置顶。"""
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
@@ -16,8 +16,6 @@ class Announcement(Base):
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    # AI 生成的一句话摘要（列表页展示）；LLM 不可用时回落为正文前 80 字
-    summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # 下架不删数据：公告有审计价值（"当时通知过什么"），下线只是对用户不可见
     is_online: Mapped[bool] = mapped_column(Boolean, default=True, index=True)

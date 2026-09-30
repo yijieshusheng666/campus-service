@@ -235,30 +235,6 @@ def _repair_truncated_json(s: str) -> dict:
     return json.loads("".join(out))
 
 
-ANNOUNCEMENT_SUMMARY_SYSTEM = """你是公告摘要助手。把公告正文压缩成一句话摘要，**只返回紧凑JSON（不要任何解释、不要markdown）**。
-
-JSON结构（严格遵守）：{"summary":"摘要"}
-
-规则：
-1. 摘要不超过 60 字，说清「什么事 + 关键时间/地点/对象」
-2. 不要评价、不要称呼、不要复述标题式空话
-3. 所有内容使用中文
-"""
-
-
-def summarize_announcement(content: str) -> str:
-    """AI 生成公告一句话摘要；失败返回空串（调用方回落为正文截断）。"""
-    chain = _extract_text_chain(ANNOUNCEMENT_SUMMARY_SYSTEM, disable_thinking=True)
-    try:
-        raw = chain.invoke({"text": content[:4000]}) or ""
-        result = _robust_json_parse(raw)
-        summary = str(result.get("summary") or "").strip()
-        return summary[:120]
-    except Exception:
-        logger.exception("公告摘要 LLM 生成失败")
-        return ""
-
-
 def extract_resume(text: str) -> dict:
     """LLM 结构化提取简历：返回含 name/phone/email/location/job_title/sections 的 dict。"""
     chain = _extract_text_chain(RESUME_EXTRACT_SYSTEM, disable_thinking=True)

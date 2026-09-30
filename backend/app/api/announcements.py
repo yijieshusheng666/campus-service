@@ -1,18 +1,12 @@
-"""平台公告 API：全员浏览（置顶优先）+ 管理员发布/编辑/下架 + AI 摘要。
-
-AI 摘要策略：发布/修改正文后转后台任务生成（LLM 调用耗时不阻塞接口），
-LLM 不可用或失败时回落为「正文前 80 字」——摘要永远不应该是发布公告的前置条件。
-"""
-import asyncio
+"""平台公告 API：全员浏览（置顶优先）+ 管理员发布/编辑/下架。"""
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin, get_current_user
-from app.core.dispatch import spawn_bg
-from app.database import AsyncSessionLocal, get_db
+from app.database import get_db
 from app.models.announcement import Announcement
 from app.models.user import User
 from app.schemas.announcement import (
@@ -21,37 +15,10 @@ from app.schemas.announcement import (
     AnnouncementOut,
     AnnouncementUpdate,
 )
-from app.services.llm import summarize_announcement
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/announcements", tags=["公告"])
-
-
-async def generate_summary_task(
-    announcement_id: int,
-    session_factory: async_sessionmaker[AsyncSession] = AsyncSessionLocal,
-) -> None:
-    """后台生成 AI 摘要。session_factory 可注入（测试环境指向测试库）。"""
-    try:
-        async with session_factory() as db:
-            ann = await db.get(Announcement, announcement_id)
-            if not ann:
-                return
-            content = ann.content
-        summary = await asyncio.to_thread(summarize_announcement, content)
-        if not summary:
-            # 回落：LLM 未配置/超时/解析失败时，用正文截断兜底
-            summary = " ".join(content.split())[:80]
-        async with session_factory() as db:
-            ann = await db.get(Announcement, announcement_id)
-            if not ann:
-                return
-            ann.summary = summary
-            await db.commit()
-        logger.info("公告摘要已生成 id=%s", announcement_id)
-    except Exception:
-        logger.exception("公告摘要生成失败 id=%s", announcement_id)
 
 
 # ---------------- 用户端 ----------------
@@ -137,7 +104,6 @@ async def create_announcement(
     db.add(ann)
     await db.commit()
     await db.refresh(ann)
-    spawn_bg(generate_summary_task(ann.id))
     return ann
 
 
@@ -151,20 +117,16 @@ async def update_announcement(
     ann = await db.get(Announcement, announcement_id)
     if not ann:
         raise HTTPException(status_code=404, detail="公告不存在")
-    content_changed = False
     if payload.title is not None:
         ann.title = payload.title.strip()
-    if payload.content is not None and payload.content.strip() != ann.content:
+    if payload.content is not None:
         ann.content = payload.content.strip()
-        content_changed = True
     if payload.is_pinned is not None:
         ann.is_pinned = payload.is_pinned
     if payload.is_online is not None:
         ann.is_online = payload.is_online
     await db.commit()
     await db.refresh(ann)
-    if content_changed:
-        spawn_bg(generate_summary_task(ann.id))
     return ann
 
 
@@ -179,17 +141,3 @@ async def delete_announcement(
         raise HTTPException(status_code=404, detail="公告不存在")
     await db.delete(ann)
     await db.commit()
-
-
-@router.post("/{announcement_id}/summary")
-async def regenerate_summary(
-    announcement_id: int,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
-):
-    """手动重新生成 AI 摘要（异步，前端稍后刷新即可看到）。"""
-    ann = await db.get(Announcement, announcement_id)
-    if not ann:
-        raise HTTPException(status_code=404, detail="公告不存在")
-    spawn_bg(generate_summary_task(ann.id))
-    return {"detail": "摘要生成中，请稍后刷新查看"}

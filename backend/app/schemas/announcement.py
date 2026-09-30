@@ -26,13 +26,12 @@ class AnnouncementUpdate(BaseModel):
 
 
 class AnnouncementListItemOut(BaseModel):
-    """列表项：不带正文（列表页只展示摘要，正文详情页再拉）。"""
+    """列表项：不带正文（正文详情页再拉）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     title: str
-    summary: str | None
     is_pinned: bool
     created_at: datetime
     publisher: AnnouncementPublisherOut | None = None
@@ -44,7 +43,6 @@ class AnnouncementOut(BaseModel):
     id: int
     title: str
     content: str
-    summary: str | None
     is_pinned: bool
     is_online: bool
     created_at: datetime

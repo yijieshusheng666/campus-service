@@ -13,9 +13,6 @@
           {{ row.title }}
         </template>
       </el-table-column>
-      <el-table-column label="摘要" min-width="220" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.summary || '（未生成）' }}</template>
-      </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="row.is_online ? 'success' : 'info'" size="small">
@@ -26,10 +23,9 @@
       <el-table-column label="发布时间" width="170">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" @click="onRegenSummary(row)">AI 摘要</el-button>
           <el-button size="small" :type="row.is_online ? 'warning' : 'success'" @click="onToggleOnline(row)">
             {{ row.is_online ? '下架' : '上架' }}
           </el-button>
@@ -65,8 +61,7 @@ import {
   manageAnnouncements,
   createAnnouncement,
   updateAnnouncement,
-  deleteAnnouncement,
-  regenerateSummary
+  deleteAnnouncement
 } from '@/api/announcement'
 
 const items = ref([])
@@ -117,13 +112,13 @@ async function onSave() {
         content: editForm.content,
         is_pinned: editForm.is_pinned
       })
-      ElMessage.success('已保存，摘要将重新生成')
+      ElMessage.success('已保存')
     } else {
       await createAnnouncement({ title: editForm.title, content: editForm.content, is_pinned: editForm.is_pinned })
-      ElMessage.success('已发布，摘要生成中')
+      ElMessage.success('已发布')
     }
     editVisible.value = false
-    setTimeout(fetchList, 1500) // 给后台摘要任务留点时间再刷新
+    fetchList()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '保存失败')
   } finally {
@@ -135,12 +130,6 @@ async function onToggleOnline(row) {
   await updateAnnouncement(row.id, { is_online: !row.is_online })
   ElMessage.success(row.is_online ? '已下架' : '已上架')
   fetchList()
-}
-
-async function onRegenSummary(row) {
-  await regenerateSummary(row.id)
-  ElMessage.success('摘要生成中，稍后自动刷新')
-  setTimeout(fetchList, 3000)
 }
 
 async function onDelete(row) {

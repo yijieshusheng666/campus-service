@@ -6,4 +6,3 @@ export const manageAnnouncements = () => request.get('/api/v1/announcements/mana
 export const createAnnouncement = (data) => request.post('/api/v1/announcements', data)
 export const updateAnnouncement = (id, data) => request.put(`/api/v1/announcements/${id}`, data)
 export const deleteAnnouncement = (id) => request.delete(`/api/v1/announcements/${id}`)
-export const regenerateSummary = (id) => request.post(`/api/v1/announcements/${id}/summary`)

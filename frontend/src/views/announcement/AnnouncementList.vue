@@ -18,7 +18,6 @@
           <span class="ann-title">{{ item.title }}</span>
           <span class="ann-time">{{ fmtTime(item.created_at) }}</span>
         </div>
-        <p class="ann-summary">{{ item.summary || '（摘要生成中…）' }}</p>
       </div>
     </div>
 
@@ -106,14 +105,6 @@ onMounted(fetchList)
 .ann-card-head { display: flex; align-items: center; gap: 8px; }
 .ann-title { font-size: 15px; font-weight: 600; color: #1d2129; flex: 1; }
 .ann-time { font-size: 12px; color: #a0a5b2; }
-.ann-summary {
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: #5a6070;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .pager { justify-content: center; margin-top: 16px; }
 
