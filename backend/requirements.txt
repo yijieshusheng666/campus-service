@@ -52,6 +52,12 @@ python-docx==1.1.2
 # ---- Misc ----
 httpx==0.28.1
 
+# ---- Task queue / cache ----
+# 可选组件：REDIS_URL 配置后才启用（见 app/config.py）。
+# 未配置时后台任务回落 asyncio、WS 推送走进程内存（单机模式，workers=1）。
+redis==5.2.1
+celery==5.4.0
+
 # ---- Tests ----
 pytest==8.3.4
 pytest-asyncio==0.25.0

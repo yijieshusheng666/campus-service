@@ -1,5 +1,4 @@
 """AI 模拟面试 API：创建(SSE 首题) / 列表 / 详情 / 对话(SSE) / 结束生成报告。"""
-import asyncio
 import json
 import logging
 
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
+from app.core.dispatch import spawn_bg
 from app.core.utils import mask_pii
 from app.database import AsyncSessionLocal, get_db
 from app.models.interview import InterviewMessage, InterviewStatus, MockInterview
@@ -22,21 +22,6 @@ from app.services.interview_plan import prewarm_plan
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/interviews", tags=["模拟面试"])
-
-# 后台任务强引用集：事件循环只持弱引用，不保活的任务可能被 GC 中途回收
-_bg_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_bg(coro) -> None:
-    t = asyncio.create_task(coro)
-    _bg_tasks.add(t)
-
-    def _on_done(task: asyncio.Task) -> None:
-        _bg_tasks.discard(task)
-        if not task.cancelled() and task.exception():
-            logger.error("后台任务异常: %s", task.exception())
-
-    t.add_done_callback(_on_done)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -155,7 +140,7 @@ async def create_interview(
     # 后台预热面试前分析（深挖计划）：首题不等待它，用户在听开场题/作答的这段时间里
     # 分析即可完成并进入缓存，后续各轮提问自动带上深挖清单（未就绪则退化为无计划）。
     if resume_text:
-        _spawn_bg(prewarm_plan(resume_text))
+        spawn_bg(prewarm_plan(resume_text))
 
     async def gen():
         # start 事件先告知 interview_id，前端据此可更新路由

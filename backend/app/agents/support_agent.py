@@ -27,6 +27,7 @@ from typing import Any, AsyncGenerator, Callable
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from app.agents.goods_agent import _image_url_to_base64_dataurl
+from app.agents.platform_query import detect_query_intent, run_query
 from app.agents.support_state import (
     PublishGoodsPhase,
     SupportSessionState,
@@ -74,6 +75,14 @@ SUPPORT_KNOWLEDGE = """
 1. 发起聊天：在商品详情页点击"联系卖家"或在设置页搜索用户发起私信。
 2. 实时聊天：基于 WebSocket 的实时消息推送，支持离线消息落库和上线后补拉。
 3. 未读消息：右上角消息图标显示未读数，30秒轮询更新。
+
+【平台公告】
+1. 查看公告：侧边栏"平台公告"页查看平台通知，置顶公告排在最前。
+2. 公告摘要：每条公告附 AI 生成的一句话摘要，点开可看完整正文。
+
+【智能客服能力】
+除了解答平台使用方法，我还可以直接帮你查询：你的订单状态、你的跑腿进度、
+搜索平台在售商品。例如直接问"我的订单到哪了"、"有没有卖耳机的"。
 
 【账号相关】
 1. 注册登录：使用用户名+邮箱+密码注册，登录支持用户名或邮箱作为账号。
@@ -372,15 +381,26 @@ async def _general_chat(
     user_id: int,
     question: str,
     image_urls: list[str] | None = None,
+    data_context: str | None = None,
 ) -> str:
     """v1 通用问答：嵌入式 RAG + 会话记忆（LLM 生成文本）。
 
     带图片时自动切换视觉模型（settings.LLM_VISION_MODEL）——文本模型收到
     image_url 内容块会直接报错或忽略，这是普通客服「看不见图」的根因。
+
+    data_context：数据查询工具拿到的实时业务数据，注入 system 提示让 LLM
+    基于真实数据回答（见 platform_query.py——查到的数据是事实，不是 LLM 编的）。
     """
     history = _get_session(user_id)
 
-    msgs: list[BaseMessage] = [SystemMessage(content=SUPPORT_SYSTEM)]
+    system = SUPPORT_SYSTEM
+    if data_context:
+        system += (
+            "\n\n【实时数据】\n以下是系统刚查询到的该用户真实业务数据，"
+            "请基于它回答，不要编造数据里没有的内容；数据为空就如实告知并引导操作：\n"
+            + data_context
+        )
+    msgs: list[BaseMessage] = [SystemMessage(content=system)]
     if history:
         trimmed = _trim_history(history)
         for m in trimmed[1:]:
@@ -434,6 +454,15 @@ async def agent_chat(
     if _detect_publish_intent(question):
         state.start_publish_goods()
         return await _handle_publish_goods(state, question, image_urls)
+
+    # 2.5 数据查询意图：确定性识别 -> 只读查询 -> LLM 基于真实数据组织回答
+    query_intent = detect_query_intent(question)
+    if query_intent:
+        data = await run_query(query_intent, user_id, question)
+        if data is not None:
+            answer = await _general_chat(user_id, question, data_context=data)
+            return _build_reply(state, answer)
+        # 查询失败（数据库异常等）：回落普通问答，不让用户看到技术错误
 
     # 3. 普通问答降级
     answer = await _general_chat(user_id, question)
@@ -503,14 +532,23 @@ async def _general_chat_stream(
     user_id: int,
     question: str,
     image_urls: list[str] | None = None,
+    data_context: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """v1 通用问答流式版：流式生成 AI 回复文本，同时写入会话记忆。
 
     带图片时切换视觉模型（与 _general_chat 同一套逻辑）。
+    data_context 语义同 _general_chat：注入实时查询数据。
     """
     history = _get_session(user_id)
 
-    msgs: list[BaseMessage] = [SystemMessage(content=SUPPORT_SYSTEM)]
+    system = SUPPORT_SYSTEM
+    if data_context:
+        system += (
+            "\n\n【实时数据】\n以下是系统刚查询到的该用户真实业务数据，"
+            "请基于它回答，不要编造数据里没有的内容；数据为空就如实告知并引导操作：\n"
+            + data_context
+        )
+    msgs: list[BaseMessage] = [SystemMessage(content=system)]
     if history:
         trimmed = _trim_history(history)
         for m in trimmed[1:]:
@@ -599,5 +637,11 @@ async def agent_chat_stream(
             yield event
         return
 
-    async for event in _general_chat_stream(user_id, question, image_urls):
+    # 数据查询意图（同 agent_chat 的 2.5 步）：先查好数据再流式生成回答
+    query_intent = detect_query_intent(question)
+    data_context = None
+    if query_intent:
+        data_context = await run_query(query_intent, user_id, question)
+
+    async for event in _general_chat_stream(user_id, question, image_urls, data_context=data_context):
         yield event

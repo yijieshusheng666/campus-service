@@ -2,13 +2,25 @@
 
 浏览器 WebSocket 无法自定义 header，鉴权 token 走 query 参数。
 消息可靠性策略：落库优先，推送失败不影响持久化，接收方上线后 REST 拉历史补齐。
+
+多进程推送（分布式模式）：
+- 单机模式（REDIS_URL 空）：推送只发到本进程内存里的连接，workers 只能开 1。
+- 分布式模式（REDIS_URL 已配）：推送统一走 Redis pub/sub，每个 worker 的监听协程
+  把消息投递给本进程里的目标连接。这样用户无论连到哪个 worker 都能收到消息，
+  uvicorn workers 可以多开。见 start_redis_bridge()。
 """
+import asyncio
+import contextlib
+import json
+import logging
+
 import jwt
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.redis_client import get_redis
 from app.core.security import decode_token
 from app.database import get_db
 from app.models.goods import Goods
@@ -16,10 +28,16 @@ from app.models.message import Message
 from app.models.user import User
 from app.schemas.message import GoodsBriefOut
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # 鉴权失败关闭码（4xxx 为应用自定义区间）
 WS_CLOSE_UNAUTHORIZED = 4401
+
+# Redis pub/sub 频道：跨 worker 投递私信推送
+WS_CHANNEL = "campus:ws"
+_redis_listener: asyncio.Task | None = None
 
 
 class ConnectionManager:
@@ -44,7 +62,7 @@ class ConnectionManager:
                 self._connections.pop(user_id, None)
 
     async def send_json_to_user(self, user_id: int, payload: dict) -> None:
-        """推送给某用户全部在线连接；失败连接就地摘除（消息已落库不丢）。"""
+        """推送给本进程内某用户全部在线连接；失败连接就地摘除（消息已落库不丢）。"""
         for ws in list(self._connections.get(user_id, [])):
             try:
                 await ws.send_json(payload)
@@ -53,6 +71,56 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+async def send_to_user(user_id: int, payload: dict) -> None:
+    """推送入口：分布式模式走 Redis pub/sub（全集群可达），单机模式直发本进程。
+
+    分布式模式下不直发本进程、统一等监听协程回投，否则「直发 + 回投」会重复投递。
+    """
+    redis = get_redis()
+    if redis is None:
+        await manager.send_json_to_user(user_id, payload)
+        return
+    await redis.publish(WS_CHANNEL, json.dumps({"user_id": user_id, "payload": payload}))
+
+
+async def _redis_listen_loop() -> None:
+    """订阅推送频道，把消息投递给本进程内的目标连接。"""
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(WS_CHANNEL)
+    logger.info("WS Redis 推送桥已启动（频道 %s）", WS_CHANNEL)
+    try:
+        async for message in pubsub.listen():
+            if message.get("type") != "message":
+                continue
+            try:
+                data = json.loads(message["data"])
+                await manager.send_json_to_user(int(data["user_id"]), data["payload"])
+            except Exception:
+                logger.exception("WS 推送桥投递失败")
+    finally:
+        await pubsub.unsubscribe(WS_CHANNEL)
+        await pubsub.aclose()
+
+
+async def start_redis_bridge() -> None:
+    """应用启动时调用：仅分布式模式启动监听协程。"""
+    global _redis_listener
+    if get_redis() is None or _redis_listener is not None:
+        return
+    _redis_listener = asyncio.create_task(_redis_listen_loop())
+
+
+async def stop_redis_bridge() -> None:
+    """应用关停时调用：取消监听协程。"""
+    global _redis_listener
+    if _redis_listener is not None:
+        _redis_listener.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _redis_listener
+        _redis_listener = None
 
 
 @router.websocket("/ws")
@@ -130,7 +198,7 @@ async def ws_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
             await db.refresh(message)
 
             # 发送方所有连接 ack（多端登录时每台设备都收到确认）
-            await manager.send_json_to_user(
+            await send_to_user(
                 user_id,
                 {
                     "type": "chat_ack",
@@ -143,7 +211,7 @@ async def ws_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
                 },
             )
             # 接收方在线连接实时推送；离线则静默（上线后 REST 拉历史）
-            await manager.send_json_to_user(
+            await send_to_user(
                 receiver_id,
                 {
                     "type": "new_message",

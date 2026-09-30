@@ -111,9 +111,21 @@ const routes = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'announcements',
+        name: 'AnnouncementList',
+        component: () => import('@/views/announcement/AnnouncementList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'admin',
         name: 'AdminCenter',
         component: () => import('@/views/admin/AdminCenter.vue'),
+        meta: { requiresAuth: true, requiresAdmin: true }
+      },
+      {
+        path: 'admin/announcements',
+        name: 'AnnouncementManage',
+        component: () => import('@/views/admin/AnnouncementManage.vue'),
         meta: { requiresAuth: true, requiresAdmin: true }
       }
     ]

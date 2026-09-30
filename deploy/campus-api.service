@@ -35,13 +35,13 @@ EnvironmentFile=/opt/campus/backend/.env
 # 公网入口一律走 Nginx 的 80 端口。若这里监听 0.0.0.0:8001，
 # 别人就能绕过 Nginx 直接打你的后端，阿里云安全组一旦漏开端口就裸奔了。
 #
-# ★ workers 固定为 1，不要改大 ★
-# 本项目有两处状态放在「进程内存」里，多 worker 会直接出错：
-#   1) app/api/ws.py 的 ConnectionManager：用户 A 连在 worker1、用户 B 连在 worker2，
-#      B 给 A 发私信时，worker2 的连接表里找不到 A，消息推送不到（消息已落库不丢，但实时性没了）
-#   2) app/api/resumes.py:28 用 asyncio.create_task 跑简历解析，任务只活在当前进程
-# 流量大了要扩容的话，得先把这两处挪到 Redis（连接表）和任务队列（解析任务），
-# 而不是简单地把 --workers 调大。
+# ★ workers 数取决于部署模式 ★
+# 单机模式（.env 里 REDIS_URL 留空）：必须 --workers 1。
+#   此时 WS 推送走进程内存、简历解析走 asyncio 后台任务，多 worker 会直接出错。
+# 分布式模式（.env 里配好 REDIS_URL，且 campus-worker.service 已启用）：
+#   WS 推送走 Redis pub/sub（app/api/ws.py 的推送桥）、简历解析走 Celery 队列，
+#   可以把 --workers 调大（例如 2）。调大前确认 campus-worker 服务在跑，
+#   否则解析任务只会堆在队列里没人消费。
 ExecStart=/opt/campus/backend/.venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips='127.0.0.1'
 

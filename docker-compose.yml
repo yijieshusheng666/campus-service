@@ -1,0 +1,113 @@
+# ============================================================
+# 校园综合服务平台 —— 一键容器化部署
+# 用法：
+#   1. 准备 backend/.env（照 .env.example 填好 LLM_API_KEY、SECRET_KEY 等）
+#   2. docker compose up -d --build
+#   3. 访问 http://服务器IP/
+# 说明：
+#   - DB_HOST/DB_PORT 由本文件覆盖为容器网络内的 mysql 服务，
+#     backend/.env 里的 localhost 配置只在本地开发时生效
+#   - redis 预留给异步任务队列与限流（Celery/缓存），本版本先纳入编排
+#   - 与 deploy/ 下的 systemd 裸机部署方案并存，二选一
+# ============================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-campus_root_pwd}
+      MYSQL_DATABASE: campus_platform
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - campus
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - campus
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # 覆盖 .env 里的本地地址，指向 compose 服务名
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD:-campus_root_pwd}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: prod
+      DEBUG: "false"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - campus
+
+  celery:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    # 覆盖镜像默认的 uvicorn 启动命令，跑 Celery worker 消费解析任务
+    command: celery -A app.tasks.celery_app worker --loglevel=info --pool=threads --concurrency=4
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD:-campus_root_pwd}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: prod
+      DEBUG: "false"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - campus
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - campus
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  campus:
