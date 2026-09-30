@@ -22,6 +22,8 @@ User=campus
 Group=campus
 WorkingDirectory=/opt/campus/backend
 EnvironmentFile=/opt/campus/backend/.env
+# systemd 不会自动给系统服务设 HOME，Celery 找不到用户目录时会有告警
+Environment=HOME=/home/campus
 
 # threads 池：LLM 调用是 IO 等待型任务，多线程足够；--concurrency 按机器内存调
 ExecStart=/opt/campus/backend/.venv/bin/celery -A app.tasks.celery_app worker \

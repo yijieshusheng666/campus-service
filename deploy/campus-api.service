@@ -37,11 +37,15 @@ EnvironmentFile=/opt/campus/backend/.env
 #
 # ★ workers 数取决于部署模式 ★
 # 单机模式（.env 里 REDIS_URL 留空）：必须 --workers 1。
-#   此时 WS 推送走进程内存、简历解析走 asyncio 后台任务，多 worker 会直接出错。
-# 分布式模式（.env 里配好 REDIS_URL，且 campus-worker.service 已启用）：
-#   WS 推送走 Redis pub/sub（app/api/ws.py 的推送桥）、简历解析走 Celery 队列，
-#   可以把 --workers 调大（例如 2）。调大前确认 campus-worker 服务在跑，
-#   否则解析任务只会堆在队列里没人消费。
+# 分布式模式（.env 已配 REDIS_URL + campus-worker.service 在跑）：
+#   已解决的两处进程内存状态 ——
+#     1) WS 连接表：推送改走 Redis pub/sub（app/api/ws.py 的推送桥），跨 worker 可达
+#     2) 简历解析任务：改投 Celery 队列（app/core/dispatch.py + app/tasks.py）
+#   仍未迁移的一处 ——
+#     3) 智能客服会话状态：app/agents/support_agent.py 的 _support_sessions /
+#        _support_states 仍是进程内存 dict。多 worker 时用户「发布商品」多轮任务
+#        可能落到不同进程，状态会丢。→ 想开多 worker，需先把这三个 dict 换成 Redis 存储。
+#   所以当前仍保持 1；把第 3 项迁到 Redis 后即可调大（例如 2）。
 ExecStart=/opt/campus/backend/.venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips='127.0.0.1'
 
