@@ -49,7 +49,10 @@
             <div class="msg-content">
               <div v-if="msg.type === 'text' || !msg.type" class="msg-bubble" :class="msg.role + '-bubble'">
                 <template v-if="msg.role === 'assistant' && msg.isTyping && !msg.content">
-                  <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+                  <div class="thinking-loader">
+                    <span class="thinking-ring"></span>
+                    <span class="thinking-label">AI 正在思考</span>
+                  </div>
                 </template>
                 <template v-else>{{ msg.content }}</template>
               </div>
@@ -81,7 +84,7 @@
           <div class="input-row">
             <el-input v-model="inputText" type="textarea" :rows="2" placeholder="输入你的问题，按 Enter 发送..." maxlength="500" show-word-limit resize="none" @keydown.enter.prevent="onSend" />
             <div class="input-actions">
-              <el-upload ref="uploader" action="#" :auto-upload="false" :show-file-list="false" :on-change="onImageSelect" :multiple="true" :limit="6" accept="image/jpeg,image/png,image/webp">
+              <el-upload ref="uploader" action="#" :auto-upload="false" :show-file-list="false" :on-change="onImageSelect" :multiple="true" accept="image/jpeg,image/png,image/webp">
                 <el-button type="default" class="upload-btn" :disabled="uploading || previewImages.length >= 6" :loading="uploading"><el-icon><Picture /></el-icon></el-button>
               </el-upload>
               <el-button type="primary" class="send-btn" :loading="loading" :disabled="!inputText.trim() && !previewImages.length" @click="onSend"><el-icon><Promotion /></el-icon></el-button>
@@ -177,23 +180,26 @@ async function loadHistory() {
   }
 }
 
-function onImageSelect(file, fileList) {
-  const raw = fileList.map(f => f.raw || f)
-  const newFiles = raw.filter(f => !rawFiles.value.includes(f))
-  rawFiles.value.push(...newFiles)
-  newFiles.forEach(f => {
-    if (f instanceof File) previewImages.value.push(URL.createObjectURL(f))
-  })
+function onImageSelect(file) {
+  const raw = file.raw || file
+  if (rawFiles.value.includes(raw)) return
+  if (rawFiles.value.length >= 6) {
+    ElMessage.warning('最多上传 6 张图片')
+    return
+  }
+  rawFiles.value.push(raw)
+  previewImages.value.push(URL.createObjectURL(raw))
 }
 
 function removeImage(index) {
+  URL.revokeObjectURL(previewImages.value[index])
   previewImages.value.splice(index, 1)
   rawFiles.value.splice(index, 1)
 }
 
-async function uploadAllImages() {
+async function uploadAllImages(files) {
   const urls = []
-  for (const file of rawFiles.value) {
+  for (const file of files) {
     try {
       const res = await uploadImage(file)
       if (res.data?.url) urls.push(res.data.url)
@@ -213,28 +219,31 @@ async function onSend() {
     return
   }
 
+  // 先快照本批待发送的图片，并立即清空选择区，避免旧图片残留或在下一次发送时被重复带上
+  const pendingPreviews = previewImages.value.slice()
+  const pendingFiles = rawFiles.value.slice()
+  previewImages.value = []
+  rawFiles.value = []
+  uploader.value?.clearFiles()
+
   if (text) messages.value.push({ role: 'user', content: text, type: 'text' })
-  if (hasImages) {
-    previewImages.value.forEach(url => {
-      messages.value.push({ role: 'user', content: url, type: 'image' })
-    })
-  }
+  pendingPreviews.forEach(url => {
+    messages.value.push({ role: 'user', content: url, type: 'image' })
+  })
 
   inputText.value = ''
   loading.value = true
   scrollToBottom()
 
   let imageUrls = []
-  if (hasImages) {
+  if (pendingFiles.length) {
     uploading.value = true
     try {
-      imageUrls = await uploadAllImages()
+      imageUrls = await uploadAllImages(pendingFiles)
     } catch (e) {
       // 图片上传已在 uploadAllImages 中提示
     }
     uploading.value = false
-    previewImages.value = []
-    rawFiles.value = []
     if (!imageUrls.length && !text) {
       messages.value.push({ role: 'assistant', content: '图片上传失败，请重试。', type: 'text' })
       loading.value = false
@@ -367,6 +376,7 @@ async function onClear() {
     messages.value = []
     previewImages.value = []
     rawFiles.value = []
+    uploader.value?.clearFiles()
     taskState.value = 'idle'
     phase.value = null
     actionData.value = null
@@ -426,10 +436,11 @@ onMounted(() => loadHistory())
 .quick-q-btn:hover { background: #fff5ec; border-color: #ff6b00; }
 
 .loading-bubble { display: flex; align-items: center; gap: 4px; padding: 14px 16px; }
-.typing-dot { width: 6px; height: 6px; background: #a0a5b2; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
-.typing-dot:nth-child(1) { animation-delay: -0.32s; }
-.typing-dot:nth-child(2) { animation-delay: -0.16s; }
-@keyframes typing { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; } 40% { transform: scale(1); opacity: 1; } }
+.thinking-loader { display: flex; align-items: center; gap: 8px; height: 20px; }
+.thinking-ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 107, 0, 0.18); border-top-color: #ff6b00; border-right-color: #ff9500; animation: thinking-spin 0.7s linear infinite; flex-shrink: 0; }
+.thinking-label { font-size: 12px; color: #9096a6; animation: thinking-fade 1.6s ease-in-out infinite; }
+@keyframes thinking-spin { to { transform: rotate(360deg); } }
+@keyframes thinking-fade { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 
 .support-footer { padding: 10px 14px; background: #fff; border-top: 1px solid #eef0f4; flex-shrink: 0; }
 .preview-row { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
