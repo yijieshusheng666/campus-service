@@ -2,23 +2,21 @@
 
 设计要点（面试讲点）：
 - 多模态视觉识别：调用 GLM-4V-Flash 免费视觉模型直读图片，告别纯文本猜图；
-- 定价是 RAG：查询同类商品历史成交价作为参考，再让 LLM 综合判断；
+- 定价参考：SQL 查同类商品在售价注入提示词（结构化统计，非向量检索），再让 LLM 综合判断；
 - 失败回退：LLM 解析异常或超时 → 返回空建议，前端保持手动填写，不阻塞流程；
 - 仅引 langchain-core，复用现有 _build_llm，无新增依赖。
 """
 from __future__ import annotations
 
 import base64
-import json
 import logging
-import re
 from pathlib import Path
 from urllib.parse import urlparse
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import settings
-from app.services.llm import _build_llm, _msg_text
+from app.services.llm import _build_llm, _msg_text, _robust_json_parse
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +224,7 @@ async def analyze_goods(image_urls: list[str], user_hint: str = "") -> dict:
         raw = await llm.ainvoke(msgs)
         text = _msg_text(raw)
         logger.info("视觉模型原始返回: %s", text[:200])
-        result = _extract_json(text)
+        result = _robust_json_parse(text)
         if result:
             return {
                 "title": str(result.get("title", "")).strip(),
@@ -279,7 +277,7 @@ async def suggest_price(
     try:
         raw = await llm.ainvoke(msgs)
         text = _msg_text(raw)
-        result = _extract_json(text)
+        result = _robust_json_parse(text)
         if result:
             return {
                 "min_price": _to_int(result.get("min_price", 0)),
@@ -299,35 +297,6 @@ async def suggest_price(
 
 
 # ---- 内部工具函数 ----
-
-def _extract_json(text: str) -> dict | None:
-    """从文本中提取 JSON 对象（支持 markdown 代码块）。"""
-    if not text:
-        return None
-
-    # 优先匹配 markdown 代码块
-    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    if code_block:
-        text = code_block.group(1)
-
-    stripped = text.strip()
-    # 模型可能返回 JSON 数组（如 [ {...}, {...} ]），取第一个对象
-    if stripped.startswith("["):
-        try:
-            arr = json.loads(stripped)
-            if isinstance(arr, list) and arr and isinstance(arr[0], dict):
-                return arr[0]
-        except json.JSONDecodeError:
-            pass
-
-    # 匹配第一个 { ... }
-    json_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group())
-        except json.JSONDecodeError:
-            pass
-    return None
 
 
 def _to_int(value) -> int:

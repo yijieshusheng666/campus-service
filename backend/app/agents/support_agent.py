@@ -1,7 +1,7 @@
 """全平台智能客服 Agent（v2 行动型）：LLM 问答 + 状态机驱动的商品发布助手。
 
 架构（v1 纯问答 -> v2 行动型）：
-- v1：嵌入式 RAG + per-user 会话记忆（保留为普通问答通道 _general_chat）；
+- v1：平台知识库直拼 prompt + per-user 会话记忆（保留为普通问答通道 _general_chat）；
 - v2：在问答之上叠加"任务状态机 + 工具绑定"，支持帮用户跑完
   「发布二手商品」全流程：收图 -> AI 分析 -> 确认 -> 生成发布参数 -> 发布确认。
 
@@ -45,7 +45,7 @@ from app.services.llm import _build_llm, _msg_text
 
 logger = logging.getLogger(__name__)
 
-# ---- 全平台知识库（嵌入式 RAG，普通问答用） ----
+# ---- 全平台知识库（常量直拼 system prompt，普通问答用） ----
 SUPPORT_KNOWLEDGE = """
 【平台概述】
 校园综合服务平台是一个面向高校学生的综合服务应用，包含二手交易、校园跑腿、AI求职、站内私信四大板块。
@@ -382,7 +382,7 @@ async def _general_chat(
     image_urls: list[str] | None = None,
     data_context: str | None = None,
 ) -> str:
-    """v1 通用问答：嵌入式 RAG + 会话记忆（LLM 生成文本）。
+    """v1 通用问答：平台知识库 prompt 注入 + 会话记忆（LLM 生成文本）。
 
     带图片时自动切换视觉模型（settings.LLM_VISION_MODEL）——文本模型收到
     image_url 内容块会直接报错或忽略，这是普通客服「看不见图」的根因。

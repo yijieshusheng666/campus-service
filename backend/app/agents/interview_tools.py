@@ -192,7 +192,7 @@ def _sanitize_eval(data: dict) -> dict:
     }
 
 
-def _evaluate_with_llm(answer: str) -> dict:
+async def _evaluate_with_llm(answer: str) -> dict:
     """单次非流式评估调用，返回四维评分与追问信号字典。"""
     prompt = ChatPromptTemplate.from_messages(
         [SystemMessage(content=EVAL_SYSTEM), ("human", "{answer}")]
@@ -204,7 +204,7 @@ def _evaluate_with_llm(answer: str) -> dict:
     if isinstance(llm, ChatOpenAI):
         llm = llm.bind(response_format={"type": "json_object"})
     chain = prompt | llm | StrOutputParser()
-    raw = chain.invoke({"answer": answer})
+    raw = await chain.ainvoke({"answer": answer})
     parsed = _robust_json_parse(raw)
     if not parsed:
         logger.warning("evaluate_answer 输出无法解析为 JSON，按中性处理")
@@ -216,7 +216,7 @@ def build_evaluate_answer(state: InterviewState):
     """构造 evaluate_answer 工具（闭包绑定会话状态）。"""
 
     @tool
-    def evaluate_answer(candidate_answer: str) -> str:
+    async def evaluate_answer(candidate_answer: str) -> str:
         """快速评估候选人刚给出的回答的四维质量，并给出追问策略信号与建议槽位。
 
         返回 JSON：substance/structure/clarity/depth（1-3 分）+ evidence
@@ -231,7 +231,7 @@ def build_evaluate_answer(state: InterviewState):
         if len(answer) > EVAL_MAX_CHARS:
             answer = answer[:EVAL_MAX_CHARS]
         try:
-            result = _evaluate_with_llm(answer)
+            result = await _evaluate_with_llm(answer)
         except Exception as e:
             logger.warning("evaluate_answer 调用失败: %s", e)
             return _neutral_eval_json("评估暂时不可用，按中性处理")

@@ -164,10 +164,11 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
 async def analyze_goods_info(
     payload: GoodsAnalyzeIn,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Agent 分析商品信息：图片 + 描述 → 标题/描述/分类/成色 + 定价建议。
 
-    定价参考同类商品历史成交价（RAG），失败回退空建议不阻塞前端。
+    定价参考同类商品在售价（SQL 统计注入提示词），失败回退空建议不阻塞前端。
     """
     urls = [u for u in payload.image_urls if isinstance(u, str) and u.strip()]
     hint = payload.user_hint.strip()
@@ -175,7 +176,7 @@ async def analyze_goods_info(
     # 1. 基础信息分析（agent 内部会自动将相对路径转为 base64 data URL）
     base = await analyze_goods(urls, hint)
 
-    # 2. 同类商品历史成交价（RAG 定价参考）
+    # 2. 同类商品在售价（SQL 定价参考）
     category = base.get("category", "其他")
     condition = base.get("condition", "九成新")
     price_text = "无历史数据"

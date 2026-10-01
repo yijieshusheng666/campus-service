@@ -34,7 +34,7 @@ TOOL_RETRIES = 2
 MAX_OBSERVATION_CHARS = 2000
 # system 中简历只注入索引片段，完整章节由 get_resume_section 按需取（上下文管理）
 MAX_RESUME_INDEX_CHARS = 1500
-# 上下文裁剪：最多携带最近 N 轮（与 interview.py 保持一致）
+# 上下文裁剪：最多携带最近 N 轮（1 轮 = user + assistant）
 MAX_HISTORY_ROUNDS = 10
 
 AGENT_SYSTEM = """你是一位资深的技术面试官，正在对候选人进行{job_position}岗位的模拟面试，当前面试阶段：{phase}。

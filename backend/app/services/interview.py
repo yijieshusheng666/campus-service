@@ -8,7 +8,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.interview_agent import agent_stream_question
 from app.agents.interview_state import InterviewState
@@ -17,25 +17,6 @@ from app.services.llm import _build_llm, _msg_text, _robust_json_parse
 
 logger = logging.getLogger(__name__)
 
-# 上下文裁剪：最多携带最近 N 轮（1 轮 = user + assistant）
-MAX_HISTORY_ROUNDS = 10
-
-INTERVIEWER_SYSTEM = """你是一位资深的技术面试官，正在对候选人进行{job_position}岗位的模拟面试。
-
-【候选人简历】
-{resume_text}
-
-【面试规则】
-1. 每次只提出一个问题，基于简历内容与岗位要求，有针对性；问题之间绝不给评价或反馈（模拟真实面试，评估在结束后的报告环节进行）
-2. 提问难度递进：自我介绍开场（中等）→ 项目/经历深挖（深入）→ 技术基础 → 场景/开放题（可含一道有压力的追问）
-3. 像真实面试官一样自适应追问：
-   - 回答具体精彩 → 顺着最有趣的细节往下深挖（如"为什么选X而不是Y？"）
-   - 回答含糊笼统 → 追问具体角色（如"这里面你个人具体负责什么？"）
-   - 出现"我们"式表述 → 要求拆出个人贡献
-   - 发现自相矛盾或惊人表述 → 当场追问，不要放过
-4. 追问要深入：技术选型原因、量化数据来源、STAR 各环节展开、踩坑与解决
-5. 口吻专业、友好；不要一次抛出多个问题；不要输出与提问无关的内容
-"""
 
 REPORT_SYSTEM = """你是资深面试教练，基于一场完整的模拟面试记录输出教练式评估报告（debrief）。
 评估按应届生/校招（0-3 年）标准校准：差异化可来自学习速度与求知欲。
@@ -77,33 +58,6 @@ JSON结构（字段名不要改）：
 8. 报告中不得出现候选人的手机号、邮箱、证件号等隐私信息；引用回答时若含此类内容一律以"[已脱敏]"替代
 9. 所有内容使用中文
 """
-
-
-def build_interview_messages(
-    resume_text: str, job_position: str, history: list[dict]
-) -> list:
-    """构建 LLM 消息列表：system(简历+岗位) + 最近 N 轮历史。
-
-    history 元素形如 {"role": "user"|"assistant", "content": str}。
-    """
-    msgs: list = [
-        SystemMessage(content=INTERVIEWER_SYSTEM.format(
-            job_position=job_position, resume_text=resume_text[:8000] or "（未提供简历）"
-        ))
-    ]
-    recent = history[-MAX_HISTORY_ROUNDS * 2:]
-    for m in recent:
-        content = str(m.get("content", "")).strip()
-        if not content:
-            continue
-        if m.get("role") == "user":
-            msgs.append(HumanMessage(content=content))
-        else:
-            msgs.append(AIMessage(content=content))
-    # 智谱等 OpenAI 兼容 API 要求 messages 必须含 user 消息，纯 system 数组报 1214
-    if len(msgs) == 1:
-        msgs.append(HumanMessage(content="请根据候选人的简历与目标岗位，开始第一轮提问。"))
-    return msgs
 
 
 def _rebuild_state(resume_text: str, job_position: str, history: list[dict]) -> InterviewState:
